@@ -1,0 +1,26 @@
+[package]
+name = "backend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+# O runtime assíncrono principal
+tokio = { version = "1.32.0", features = ["full"] }
+
+# O framework web
+axum = "0.8.4"
+
+# Para serialização e desserialização de dados (JSON)
+serde = { version = "1.0.188", features = ["derive"] }
+serde_json = "1.0.107"
+
+# Toolkit SQL para interagir com o banco de dados de forma segura
+sqlx = { version = "0.8.5", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono"] }
+
+# Para carregar variáveis de ambiente de um arquivo .env
+dotenvy = "0.15.7"
+
+# Para logging
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
