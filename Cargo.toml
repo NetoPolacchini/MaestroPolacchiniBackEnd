@@ -24,3 +24,18 @@ dotenvy = "0.15.7"
 # Para logging
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+
+# Hashing de Senhas
+bcrypt = "0.17.1"
+
+# JSON Web Tokens (JWT)
+jsonwebtoken = "9.3.0"
+
+# Gerador de IDs únicos
+uuid = { version = "1.8.0", features = ["v4", "serde"] }
+
+# Manipulação de Datas
+chrono = { version = "0.4.38", features = ["serde"] }
+
+# Validação de dados de entrada
+validator = { version = "0.20.0", features = ["derive"] }

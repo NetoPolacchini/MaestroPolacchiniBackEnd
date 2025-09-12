@@ -1,62 +1,51 @@
-// Adicionamos o TcpListener do Tokio
+use axum::{
+    middleware,
+    routing::{get, post},
+    Router,
+};
 use tokio::net::TcpListener;
-use axum::{http::StatusCode, response::Json, routing::get, Router};
-use serde_json::{json, Value};
-use std::time::Duration;
-use sqlx::postgres::{PgPoolOptions};
-use std::env;
+
+// Declaração dos nossos módulos
+mod common;
+mod config;
+mod db;
+mod handlers;
+mod middleware;
+mod models;
+mod services;
+
+// Importações principais
+use crate::config::AppState;
+use crate::middleware::auth::auth_middleware;
 
 #[tokio::main]
 async fn main() {
+    // Carrega a configuração e inicializa o estado
+    let app_state = AppState::new().await;
 
-    tracing_subscriber::fmt().with_target(false).compact().init();
+    // Define as rotas de autenticação (públicas)
+    let auth_routes = Router::new()
+        .route("/register", post(handlers::auth::register))
+        .route("/login", post(handlers::auth::login));
 
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL deve ser definida");
+    // Define as rotas de usuário (protegidas pelo middleware)
+    let user_routes = Router::new()
+        .route("/me", get(handlers::auth::get_me))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            auth_middleware,
+        ));
 
-    let db_pool = match PgPoolOptions::new()
-        .max_connections(5)
-        .acquire_timeout(Duration::from_secs(3))
-        .connect(&database_url)
-        .await
-    {
-        Ok(pool) => {
-            tracing::info!("✅ Conexão com o banco de dados estabelecida com sucesso!");
-            pool
-        }
-        Err(e) => {
-            tracing::error!("🔥 Falha ao conectar ao banco de dados: {:?}", e);
-            std::process::exit(1);
-        }
-    };
-    
-    // O aviso sobre `_db_pool` pode ser ignorado por enquanto.
-    // Usaremos a variável `db_pool` na Fase 1.
-
+    // Combina tudo no router principal
     let app = Router::new()
-        .route("/api/health", get(health_check_handler));
+        .route("/api/health", get(|| async { "OK" }))
+        .nest("/api/auth", auth_routes)
+        .nest("/api/users", user_routes)
+        .with_state(app_state);
 
-    // --- BLOCO DE CÓDIGO CORRIGIDO ---
-    // 1. Define o endereço para escutar
+    // Inicia o servidor
     let addr = "0.0.0.0:8000";
-    
-    // 2. Cria um "ouvinte" TCP usando Tokio
-    let listener = match TcpListener::bind(addr).await {
-        Ok(listener) => listener,
-        Err(e) => {
-            tracing::error!("🔥 Falha ao iniciar o listener TCP: {:?}", e);
-            std::process::exit(1);
-        }
-    };
-    
+    let listener = TcpListener::bind(addr).await.unwrap();
     tracing::info!("🚀 Servidor escutando em {}", listener.local_addr().unwrap());
-    
-    // 3. Inicia o servidor Axum com o listener do Tokio
-    axum::serve(listener, app.into_make_service())
-        .await
-        .unwrap();
-}
-
-async fn health_check_handler() -> (StatusCode, Json<Value>) {
-    let response = json!({ "status": "ok" });
-    (StatusCode::OK, Json(response))
+    axum::serve(listener, app.into_make_service()).await.unwrap();
 }
