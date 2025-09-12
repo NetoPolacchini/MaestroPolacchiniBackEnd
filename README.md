@@ -7,7 +7,9 @@ src/
     ├── error.rs
     ├──mod.rs
 ├── config/       # Configurações do ambiente (ex: banco de dados, chaves)
+    ├── mod.rs
 ├── db/           # Camada de acesso ao banco de dados (Repository pattern)
+    ├── mod.rs
 ├── handlers/     # Lógica de controle de requisições
     ├── auth.rs
     ├── mod.rs
@@ -18,4 +20,6 @@ src/
     ├── auth.rs
     ├── mod.rs
 ├── services/     # Lógica de negócio
+    ├── auth.rs
+    ├── mod.rs
 └── main.rs       # Ponto de entrada da aplicação

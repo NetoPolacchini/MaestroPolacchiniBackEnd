@@ -11,6 +11,9 @@ tokio = { version = "1.32.0", features = ["full"] }
 # O framework web
 axum = "0.8.4"
 
+#Necessário para `async fn` em traits, como no FromRequestParts
+async-trait = "0.1.79"
+
 # Para serialização e desserialização de dados (JSON)
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.107"
@@ -28,6 +31,8 @@ tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 # Hashing de Senhas
 bcrypt = "0.17.1"
 
+thiserror = "2.0.16"
+
 # JSON Web Tokens (JWT)
 jsonwebtoken = "9.3.0"
 
@@ -39,3 +44,6 @@ chrono = { version = "0.4.38", features = ["serde"] }
 
 # Validação de dados de entrada
 validator = { version = "0.20.0", features = ["derive"] }
+
+anyhow = "1.0.99"
+axum-extra = { version = "0.10.1", features = ["typed-header"] }

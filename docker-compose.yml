@@ -19,13 +19,14 @@ services:
   backend:
     container_name: meu_app_backend
     build:
-      # Diz ao Docker para procurar o Dockerfile dentro da pasta 'backend'
+      # CORREÇÃO: O contexto de build deve ser a pasta ./backend
       context: .
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
     env_file:
-      - /.env
+      # CORREÇÃO: O caminho para o .env, relativo ao docker-compose.yml
+      - ./.env
     depends_on:
       db:
         condition: service_healthy
