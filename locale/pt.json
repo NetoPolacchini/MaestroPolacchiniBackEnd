@@ -1,0 +1,13 @@
+{
+  "EmailAlreadyExists": "Este e-mail já está em uso.",
+  "InvalidCredentials": "E-mail ou senha inválidos.",
+  "InvalidToken": "Token de autenticação inválido ou ausente.",
+  "SkuAlreadyExists": "Um produto com este SKU já existe.",
+  "UniqueConstraintViolation": "Ocorreu um conflito no banco de dados.",
+  "ValidationError": "Dados de entrada inválidos.",
+  "InternalServerError": "Ocorreu um erro inesperado.",
+  "UnitNameAlreadyExists": "Uma unidade com o nome '{value}' já existe.",
+  "UnitSymbolAlreadyExists": "Uma unidade com o símbolo '{value}' já existe.",
+  "CategoryNameAlreadyExists": "Uma categoria com o nome '{value}' já existe neste nível.",
+  "ForbiddenAccess": "Você não tem permissão para aceder a este recurso."
+}

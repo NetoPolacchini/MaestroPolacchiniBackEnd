@@ -1,0 +1,13 @@
+{
+  "EmailAlreadyExists": "This email is already in use.",
+  "InvalidCredentials": "Invalid email or password.",
+  "InvalidToken": "Invalid or missing authentication token.",
+  "SkuAlreadyExists": "A product with this SKU already exists.",
+  "UniqueConstraintViolation": "A database conflict occurred.",
+  "ValidationError": "Invalid input data.",
+  "InternalServerError": "An unexpected error occurred.",
+  "UnitNameAlreadyExists": "A unit with the name '{value}' already exists.",
+  "UnitSymbolAlreadyExists": "A unit with the symbol '{value}' already exists.",
+  "CategoryNameAlreadyExists": "A category with the name '{value}' already exists at this level.",
+  "ForbiddenAccess": "You do not have permission to access this resource."
+}

@@ -11,7 +11,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready", "-U", "user", "-d", "meu_app"]
+      test: ["CMD", "pg_isready", "-U", "user", "-d", "meu_app"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -23,7 +23,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "3000:3000"
     env_file:
       # CORREÇÃO: O caminho para o .env, relativo ao docker-compose.yml
       - ./.env

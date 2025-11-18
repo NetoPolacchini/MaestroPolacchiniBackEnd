@@ -1,4 +1,4 @@
-// src/services/auth.rs
+// src/services/login
 
 use bcrypt::{hash, verify};
 use chrono::Utc;
