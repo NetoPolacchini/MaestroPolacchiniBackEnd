@@ -1,16 +1,17 @@
-//src/common/error.rs
+// src/common/error.rs
 
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
-use serde_json::json;
+use serde::Serialize; // Importante para serializar a resposta customizada
 use thiserror::Error;
+use std::collections::HashMap; // Necessário para o mapa de erros
 use crate::config::I18nStore;
 use crate::middleware::i18n::Locale;
 
-// Nosso tipo de erro, agora com `thiserror` para melhor ergonomia.
+// Nosso tipo de erro principal (Enum do Backend)
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("Erro de validação")]
@@ -31,27 +32,25 @@ pub enum AppError {
     #[error("SKU já existe")]
     SkuAlreadyExists,
 
-    // --- NOSSAS NOVAS VARIANTES ---
     #[error("O nome da unidade já existe: {0}")]
-    UnitNameAlreadyExists(String), // Armazena o 'name'
+    UnitNameAlreadyExists(String),
 
     #[error("O símbolo da unidade já existe: {0}")]
-    UnitSymbolAlreadyExists(String), // Armazena o 'symbol'
+    UnitSymbolAlreadyExists(String),
 
     #[error("Violação de restrição única: {0}")]
     UniqueConstraintViolation(String),
 
-    // --- NOVA LINHA ---
     #[error("Uma categoria com este nome já existe (neste nível): {0}")]
     CategoryNameAlreadyExists(String),
 
+    #[error("Você já possui um estabelecimento com o nome: {0}")]
+    TenantNameAlreadyExists(String),
 
-    // Variante para erros de banco de dados (exemplo com sqlx)
+    // Erros técnicos (wrappers)
     #[error("Erro de banco de dados")]
     DatabaseError(#[from] sqlx::Error),
-    
-    // Variante genérica para qualquer outro erro inesperado
-    // `anyhow::Error` é ótimo para capturar o contexto do erro.
+
     #[error("Erro interno do servidor")]
     InternalServerError(#[from] anyhow::Error),
 
@@ -63,85 +62,149 @@ pub enum AppError {
 
     #[error("Acesso Negado")]
     ForbiddenAccess,
-    
 }
 
+// --- Estrutura de Resposta da API (JSON) ---
+#[derive(Serialize)]
 pub struct ApiError {
-    pub(crate) status: StatusCode,
-    pub(crate) message: String,
+    #[serde(skip)] // Não queremos o status code numérico dentro do JSON, ele vai no Header HTTP
+    pub status: StatusCode,
+
+    pub error: String, // Mensagem amigável
+
+    // Só aparece no JSON se tiver conteúdo (Ex: erros de validação)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<HashMap<String, Vec<String>>>,
 }
 
+// Transforma nossa struct ApiError numa Resposta HTTP do Axum
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = Json(json!({ "error": self.message }));
-        (self.status, body).into_response()
+        let status = self.status;
+        // O axum::Json serializa automaticamente a struct graças ao #[derive(Serialize)]
+        (status, Json(self)).into_response()
     }
 }
 
-// src/common/error.rs
-// ... (imports)
+// --- Helper para simplificar erros do Validator ---
+// Transforma: ValidationErrors { field: "sku", kind: "length", ... }
+// Em: { "sku": ["O tamanho deve ser maior que 3"] }
+fn transform_validation_errors<F>(
+    err: validator::ValidationErrors,
+    resolve_key: F // <--- O "Tradutor" entra aqui
+) -> HashMap<String, Vec<String>>
+where
+    F: Fn(&str) -> String // Diz que 'resolve_key' é uma função que troca String por String
+{
+    let mut map = HashMap::new();
 
-// ... (struct ApiError e impl IntoResponse) ...
+    for (field, error_kind) in err.field_errors() {
+        let messages: Vec<String> = error_kind
+            .iter()
+            .map(|e| {
+                // LÓGICA DE TRADUÇÃO INTELIGENTE:
+                // 1. Se o erro já tem mensagem (hardcoded), usa ela.
+                // 2. Se não, pega o código (ex: "LocationRequiredForStock") e pede para traduzir.
+                e.message
+                    .as_ref()
+                    .map(|cow| cow.to_string())
+                    .unwrap_or_else(|| resolve_key(&e.code)) // <--- Aqui acontece a mágica!
+            })
+            .collect();
 
+        map.insert(field.to_string(), messages);
+    }
+
+    map
+}
+
+// --- Lógica de Tradução e Conversão ---
 impl AppError {
     pub fn to_api_error(self, locale: &Locale, i18n: &I18nStore) -> ApiError {
         let lang_code = &locale.0;
 
-        // --- Helper Interno ---
-        // Esta função pega o template (ex: "O nome é '{value}'")
+        // 1. Helper de Tradução (Busca no JSON ou usa Fallback)
         let get_template = |key: &str| {
             i18n.get(lang_code)
                 .and_then(|translations| translations.get(key))
                 .cloned()
                 .unwrap_or_else(|| {
-                    // Fallback para "en" se o idioma ou a chave não existirem
+                    // Tenta inglês ou devolve a chave bruta
                     i18n.get("en")
                         .and_then(|t| t.get(key))
                         .cloned()
                         .unwrap_or_else(|| key.to_string())
                 })
         };
-        // --- Fim do Helper ---
 
-        // MUDANÇA: O match agora lida com os placeholders
-        let (status, message) = match self {
-            // --- Erros Estáticos (sem variáveis) ---
-            AppError::ValidationError(_) => (StatusCode::BAD_REQUEST, get_template("ValidationError")),
-            AppError::EmailAlreadyExists => (StatusCode::CONFLICT, get_template("EmailAlreadyExists")),
-            AppError::InvalidCredentials => (StatusCode::UNAUTHORIZED, get_template("InvalidCredentials")),
-            AppError::InvalidToken => (StatusCode::UNAUTHORIZED, get_template("InvalidToken")),
-            AppError::UserNotFound => (StatusCode::NOT_FOUND, get_template("UserNotFound")),
-            AppError::SkuAlreadyExists => (StatusCode::CONFLICT, get_template("SkuAlreadyExists")),
-            AppError::ForbiddenAccess => (StatusCode::FORBIDDEN, get_template("ForbiddenAccess")),
+        // 2. Logging Inteligente (Antes de responder, registramos o erro no terminal)
+        match &self {
+            // Avisos (Cliente errou algo) - Amarelo/Warn
+            AppError::ValidationError(e) => tracing::warn!("⚠️ Validação falhou: {:?}", e),
+            AppError::InvalidCredentials
+            | AppError::EmailAlreadyExists
+            | AppError::SkuAlreadyExists => tracing::warn!("⚠️ Regra de negócio: {}", self),
 
-            // --- Erros Dinâmicos (com variáveis) ---
+            // Erros Críticos (Servidor quebrou) - Vermelho/Error
+            AppError::DatabaseError(e) => tracing::error!("🔥 ERRO DE BANCO: {:?}", e),
+            AppError::InternalServerError(e) => tracing::error!("🔥 ERRO INTERNO: {:?}", e),
+
+            // Outros
+            _ => tracing::info!("ℹ️ Erro API: {}", self),
+        }
+
+        // 3. Mapeamento de Status, Mensagem e Detalhes
+        let (status, message, details) = match self {
+
+            // Caso especial: Validação (retorna detalhes)
+            AppError::ValidationError(errs) => {
+                let details_map = transform_validation_errors(errs, &get_template);
+                (
+                    StatusCode::BAD_REQUEST,
+                    get_template("ValidationError"),
+                    Some(details_map) // <--- Aqui preenchemos o details!
+                )
+            },
+
+            // Erros Estáticos
+            AppError::EmailAlreadyExists => (StatusCode::CONFLICT, get_template("EmailAlreadyExists"), None),
+            AppError::InvalidCredentials => (StatusCode::UNAUTHORIZED, get_template("InvalidCredentials"), None),
+            AppError::InvalidToken => (StatusCode::UNAUTHORIZED, get_template("InvalidToken"), None),
+            AppError::UserNotFound => (StatusCode::NOT_FOUND, get_template("UserNotFound"), None),
+            AppError::SkuAlreadyExists => (StatusCode::CONFLICT, get_template("SkuAlreadyExists"), None),
+            AppError::ForbiddenAccess => (StatusCode::FORBIDDEN, get_template("ForbiddenAccess"), None),
+
+            // Erros Dinâmicos (com replace)
             AppError::UnitNameAlreadyExists(name) => {
-                let template = get_template("UnitNameAlreadyExists");
-                // Aqui fazemos a substituição!
-                (StatusCode::CONFLICT, template.replace("{value}", &name))
+                let t = get_template("UnitNameAlreadyExists");
+                (StatusCode::CONFLICT, t.replace("{value}", &name), None)
             }
             AppError::UnitSymbolAlreadyExists(symbol) => {
-                let template = get_template("UnitSymbolAlreadyExists");
-                // Aqui fazemos a substituição!
-                (StatusCode::CONFLICT, template.replace("{value}", &symbol))
+                let t = get_template("UnitSymbolAlreadyExists");
+                (StatusCode::CONFLICT, t.replace("{value}", &symbol), None)
             }
-            AppError::UniqueConstraintViolation(constraint_name) => {
-                let template = get_template("UniqueConstraintViolation");
-                (StatusCode::CONFLICT, template.replace("{value}", &constraint_name)) // Mantemos o {0} para o fallback
-            }
-
             AppError::CategoryNameAlreadyExists(name) => {
-                let template = get_template("CategoryNameAlreadyExists");
-                (StatusCode::CONFLICT, template.replace("{value}", &name))
+                let t = get_template("CategoryNameAlreadyExists");
+                (StatusCode::CONFLICT, t.replace("{value}", &name), None)
+            }
+            AppError::TenantNameAlreadyExists(name) => {
+                let t = get_template("TenantNameAlreadyExists");
+                (StatusCode::CONFLICT, t.replace("{value}", &name), None)
+            }
+            AppError::UniqueConstraintViolation(val) => {
+                let t = get_template("UniqueConstraintViolation");
+                (StatusCode::CONFLICT, t.replace("{value}", &val), None)
             }
 
-            // --- Erros Internos ---
-            ref e => {
-                tracing::error!("Erro Interno do Servidor: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, get_template("InternalServerError"))
-            }
+            // Erros Internos (escondemos os detalhes técnicos do usuário)
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, get_template("InternalServerError"), None),
         };
 
-        ApiError { status, message }
+        // 4. Retorna a struct pronta
+        ApiError {
+            status,
+            error: message,
+            details,
+        }
     }
 }

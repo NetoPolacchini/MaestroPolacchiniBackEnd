@@ -9,5 +9,10 @@
   "UnitNameAlreadyExists": "Uma unidade com o nome '{value}' já existe.",
   "UnitSymbolAlreadyExists": "Uma unidade com o símbolo '{value}' já existe.",
   "CategoryNameAlreadyExists": "Uma categoria com o nome '{value}' já existe neste nível.",
-  "ForbiddenAccess": "Você não tem permissão para aceder a este recurso."
+  "ForbiddenAccess": "Você não tem permissão para aceder a este recurso.",
+  "TenantNameAlreadyExists": "Você já possui um estabelecimento chamado '{value}'.",
+  "LocationRequiredForStock": "Para definir um estoque inicial, é obrigatório informar o Local.",
+  "LocationRequiredForThreshold": "Para definir alerta de estoque baixo, é obrigatório informar o Local.",
+  "required": "Este campo é obrigatório.",
+  "range": "O valor está fora do intervalo permitido."
 }

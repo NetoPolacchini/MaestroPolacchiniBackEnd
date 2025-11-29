@@ -8,15 +8,16 @@ use validator::{Validate, ValidationError};
 use sqlx::Acquire;
 
 // Importa os nossos extratores e erros
-use crate::{
-    common::error::{ApiError, AppError},
-    config::AppState,
-    middleware::{
-        auth::AuthenticatedUser, // O extrator de Utilizador
-        i18n::Locale,            // O extrator de Idioma
-        tenancy::TenantContext,  // O extrator de Tenant (do X-Tenant-ID)
-    },
+use crate::{common::error::{ApiError, AppError}, config::AppState, middleware::{
+    auth::AuthenticatedUser, // O extrator de Utilizador
+    i18n::Locale,            // O extrator de Idioma
+    tenancy::TenantContext,  // O extrator de Tenant (do X-Tenant-ID)
+}
 };
+// Importa os nossos extratores e erros
+use crate::common::db_utils::get_rls_connection;
+use chrono::NaiveDate; // Importante para a validade
+use crate::models::inventory::StockMovementReason; // Importe o Enum
 
 // ---
 // Validação Customizada (Corrigida)
@@ -32,49 +33,6 @@ fn validate_not_negative(val: &Decimal) -> Result<(), ValidationError> {
 }
 
 // ---
-// Helper RLS: A "Chave" para o Banco de Dados
-// ---
-/// Adquire uma conexão da pool e define as variáveis RLS (a "chave").
-async fn get_rls_connection(
-    app_state: &AppState,
-    tenant_ctx: &TenantContext,
-    user: &AuthenticatedUser,
-    locale: &Locale,
-) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, ApiError> {
-
-    // 1. Adquire uma conexão única da pool
-    let mut conn = app_state.db_pool.acquire().await.map_err(|e| {
-        tracing::error!("Falha ao adquirir conexão da pool: {}", e);
-        AppError::DatabaseError(e).to_api_error(locale, &app_state.i18n_store)
-    })?;
-
-    // 2. Define o tenant_id nesta conexão específica.
-    // O RLS no PostgreSQL irá agora usar este valor.
-    sqlx::query("SET LOCAL app.tenant_id = $1")
-        .bind(tenant_ctx.0)
-        .execute(&mut *conn) // Usa &mut *conn (deref)
-        .await
-        .map_err(|e| {
-            tracing::error!("Falha ao definir RLS app.tenant_id: {}", e);
-            AppError::DatabaseError(e).to_api_error(locale, &app_state.i18n_store)
-        })?;
-
-    // 3. Define o user_id (para futura auditoria a nível de banco)
-    sqlx::query("SET LOCAL app.user_id = $1")
-        .bind(user.0.id) // user.0 dá acesso ao 'User' dentro do 'AuthenticatedUser'
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| {
-            tracing::error!("Falha ao definir RLS app.user_id: {}", e);
-            AppError::DatabaseError(e).to_api_error(locale, &app_state.i18n_store)
-        })?;
-
-    // 4. Retorna a conexão "pronta" e segura
-    Ok(conn)
-}
-
-
-// ---
 // Payload: CreateItem (O mesmo)
 // ---
 #[derive(Debug, Deserialize, Validate)]
@@ -82,19 +40,53 @@ async fn get_rls_connection(
 pub struct CreateItemPayload {
     #[validate(required(message = "O campo 'categoryId' é obrigatório."))]
     pub category_id: Option<Uuid>,
+
     #[validate(required(message = "O campo 'baseUnitId' é obrigatório."))]
     pub base_unit_id: Option<Uuid>,
-    #[validate(required(message = "O campo 'locationId' é obrigatório."))]
+
+    // [NOVO] O usuário precisa informar quanto custou esse estoque inicial
+    // Se não tiver estoque inicial, pode mandar 0.
+    #[validate(custom(function = "validate_not_negative"))]
+    #[serde(default)] // Se o JSON não tiver esse campo, assume 0
+    pub initial_cost: Decimal,
+
     pub location_id: Option<Uuid>,
+
     #[validate(length(min = 1, message = "O SKU é obrigatório."))]
     pub sku: String,
+
     #[validate(length(min = 1, message = "O nome é obrigatório."))]
     pub name: String,
+
     pub description: Option<String>,
+
     #[validate(custom(function = "validate_not_negative"))]
     pub initial_stock: Decimal,
+
     #[validate(custom(function = "validate_not_negative"))]
     pub low_stock_threshold: Decimal,
+}
+
+// MUDANÇA 2: Validação de Consistência
+// O Rust permite adicionar lógica ao struct.
+impl CreateItemPayload {
+    fn validate_consistency(&self) -> Result<(), ValidationError> {
+        // Regra: Se o estoque for maior que zero, PRECISAMOS saber onde guardar (location_id).
+        if self.initial_stock > Decimal::ZERO && self.location_id.is_none() {
+            //let mut err = ValidationError::new("location_required");
+            //err.message = Some("Para definir um estoque inicial, é obrigatório informar o Local (locationId).".into());
+            return Err(ValidationError::new("LocationRequiredForStock"));
+        }
+
+        // Regra: Se definir alerta de estoque baixo, precisa de um local.
+        if self.low_stock_threshold > Decimal::ZERO && self.location_id.is_none() {
+            //let mut err = ValidationError::new("location_required");
+            //err.message = Some("Para definir alerta de estoque baixo, é obrigatório informar o Local (locationId).".into());
+            return Err(ValidationError::new("LocationRequiredForThreshold"));
+        }
+
+        Ok(())
+    }
 }
 
 // ---
@@ -103,38 +95,44 @@ pub struct CreateItemPayload {
 pub async fn create_item(
     State(app_state): State<AppState>,
     locale: Locale,
-    user: AuthenticatedUser, // <-- Mudança: obtemos o 'user'
+    user: AuthenticatedUser,
     tenant: TenantContext,
     Json(payload): Json<CreateItemPayload>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    payload
-        .validate()
+    // Validação padrão do Validator
+    payload.validate()
         .map_err(|e| AppError::ValidationError(e).to_api_error(&locale, &app_state.i18n_store))?;
 
-    // 1. Adquire uma conexão segura com RLS
+    // MUDANÇA 3: Nossa validação de consistência manual
+    payload.validate_consistency()
+        .map_err(|e| {
+            // Criamos um ValidationErrors manual para manter o padrão de resposta
+            let mut errors = validator::ValidationErrors::new();
+            errors.add("locationId", e); // Atribui o erro ao campo locationId
+            AppError::ValidationError(errors).to_api_error(&locale, &app_state.i18n_store)
+        })?;
+
     let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
 
-    // 2. O Serviço de Inventário agora é chamado com a conexão RLS
-    // (O serviço irá iniciar a sua própria transação a partir desta conexão)
+    // MUDANÇA 4: Passamos location_id como Option (sem o unwrap)
     let new_item = app_state
         .inventory_service
-        .create_item_with_initial_stock(
-            &mut *rls_conn, // <-- MUDANÇA: Passa a conexão RLS
-            tenant.0,
-            payload.location_id.unwrap(),
-            payload.category_id.unwrap(),
-            payload.base_unit_id.unwrap(),
-            &payload.sku,
-            &payload.name,
-            payload.description.as_deref(),
-            payload.initial_stock,
-            payload.low_stock_threshold,
+        .create_item(
+                      &mut *rls_conn,
+                      tenant.0,
+                      payload.location_id, // Passa Option<Uuid>
+                      payload.category_id.unwrap(),
+                      payload.base_unit_id.unwrap(),
+                      &payload.sku,
+                      &payload.name,
+                      payload.description.as_deref(),
+                      payload.initial_stock,
+                      payload.initial_cost,
+                      payload.low_stock_threshold,
         )
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
-
-    // A conexão 'rls_conn' é libertada e volta para a pool aqui.
 
     Ok((StatusCode::CREATED, Json(new_item)))
 }
@@ -150,6 +148,7 @@ pub async fn get_all_items(
 ) -> Result<impl IntoResponse, ApiError> {
 
     // 1. Adquire uma conexão segura com RLS
+
     let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
 
     // 2. Chama o repositório com a conexão RLS
@@ -308,4 +307,117 @@ pub async fn get_all_categories(
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
 
     Ok((StatusCode::OK, Json(categories)))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct SellItemPayload {
+    pub location_id: Uuid,
+    pub item_id: Uuid,
+
+    #[validate(custom(function = "validate_not_negative"))]
+    pub quantity: Decimal,
+
+    #[validate(custom(function = "validate_not_negative"))]
+    pub unit_price: Decimal,
+
+    // [NOVO] Opcional. Se vier, tenta baixar desse lote. Se não, usa FIFO.
+    pub batch_number: Option<String>,
+
+    // [NOVO] Adicione se quiser permitir vender de uma posição específica
+    pub position: Option<String>,
+}
+
+pub async fn sell_item(
+    State(app_state): State<AppState>,
+    locale: Locale,
+    user: AuthenticatedUser,
+    tenant: TenantContext,
+    Json(payload): Json<SellItemPayload>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    payload.validate()
+        .map_err(|e| AppError::ValidationError(e).to_api_error(&locale, &app_state.i18n_store))?;
+
+    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
+
+    // Chama o serviço de Venda Direta (sem reserva prévia)
+    app_state.inventory_service
+        .sell_item(
+            &mut *rls_conn,
+            tenant.0,
+            payload.item_id,
+            payload.location_id,
+            payload.quantity,
+            payload.unit_price,
+            false, // consume_reservation = false (Venda Direta)
+            Some("Venda via API"),
+            payload.batch_number, // Passa o lote (ou None)
+            payload.position,
+        )
+        .await
+        .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
+
+    Ok(StatusCode::OK)
+}
+
+// --- DTO: Entrada de Estoque ---
+#[derive(Debug, Deserialize, Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct AddStockPayload {
+    pub location_id: Uuid,
+    pub item_id: Uuid,
+
+    #[validate(custom(function = "validate_not_negative"))]
+    pub quantity: Decimal,
+
+    #[validate(custom(function = "validate_not_negative"))]
+    pub unit_cost: Decimal, // Quanto pagou por unidade (para o Custo Médio)
+
+    pub reason: StockMovementReason, // Ex: "PURCHASE"
+    pub notes: Option<String>,
+
+    // [NOVOS CAMPOS DE LOTE]
+    // Se for remédio, manda esses dois. Se for roupa, manda null.
+    pub batch_number: Option<String>,
+    pub expiration_date: Option<NaiveDate>, // Formato YYYY-MM-DD
+
+    pub position: Option<String>,
+}
+
+// --- HANDLER ---
+pub async fn add_stock(
+    State(app_state): State<AppState>,
+    locale: Locale,
+    user: AuthenticatedUser,
+    tenant: TenantContext,
+    Json(payload): Json<AddStockPayload>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    payload.validate()
+        .map_err(|e| AppError::ValidationError(e).to_api_error(&locale, &app_state.i18n_store))?;
+
+    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
+
+    // Chama o serviço poderoso que criamos
+    let updated_level = app_state.inventory_service
+        .add_stock(
+            &mut *rls_conn,
+            tenant.0,
+            payload.item_id,
+            payload.location_id,
+            payload.quantity,
+            payload.unit_cost,
+            payload.reason,
+            payload.notes.as_deref(),
+            // Passa os dados do lote (opcionais)
+            payload.batch_number,
+            payload.expiration_date,
+            payload.position,
+        )
+        .await
+        .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
+
+    // Retorna o novo saldo total para o frontend atualizar a tela
+    Ok((StatusCode::OK, Json(updated_level)))
 }

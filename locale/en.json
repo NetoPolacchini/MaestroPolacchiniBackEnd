@@ -9,5 +9,10 @@
   "UnitNameAlreadyExists": "A unit with the name '{value}' already exists.",
   "UnitSymbolAlreadyExists": "A unit with the symbol '{value}' already exists.",
   "CategoryNameAlreadyExists": "A category with the name '{value}' already exists at this level.",
-  "ForbiddenAccess": "You do not have permission to access this resource."
+  "ForbiddenAccess": "You do not have permission to access this resource.",
+  "TenantNameAlreadyExists": "You already have an establishment named '{value}'.",
+  "LocationRequiredForStock": "To set initial stock, Location is required.",
+  "LocationRequiredForThreshold": "To set low stock alert, Location is required.",
+  "required": "This field is required.",
+  "range": "Value is out of allowed range."
 }

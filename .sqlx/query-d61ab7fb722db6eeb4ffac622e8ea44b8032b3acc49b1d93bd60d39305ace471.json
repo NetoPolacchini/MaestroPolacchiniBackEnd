@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1 FROM tenants t\n                JOIN user_tenants ut ON t.id = ut.tenant_id\n                WHERE ut.user_id = $1 AND t.name = $2\n            )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d61ab7fb722db6eeb4ffac622e8ea44b8032b3acc49b1d93bd60d39305ace471"
+}

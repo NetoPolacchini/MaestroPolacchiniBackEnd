@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO inventory_levels (tenant_id, item_id, location_id, quantity, low_stock_threshold)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (tenant_id, item_id, location_id)\n            DO UPDATE SET\n                -- Adiciona (ou subtrai) a quantidade da existente\n                quantity = inventory_levels.quantity + $4\n            RETURNING *\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "location_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "quantity",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "low_stock_threshold",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Numeric",
+        "Numeric"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d01c208574f27fa54cf03b8a4e4770125019f14374b2b6aeeb8020d36417dfad"
+}

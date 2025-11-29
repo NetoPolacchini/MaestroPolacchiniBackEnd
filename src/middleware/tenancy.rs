@@ -15,6 +15,7 @@ const TENANT_ID_HEADER: &str = "x-tenant-id";
 #[derive(Debug, Clone)]
 pub struct TenantContext(pub Uuid);
 
+// Sempre que uma função pedir um TenantContext, pare tudo e execute este código aqui primeiro para tentar criar um
 impl<S> FromRequestParts<S> for TenantContext
 where
     S: Send + Sync,
@@ -35,13 +36,16 @@ where
                 // Tenta converter o valor do cabeçalho para uma string
                 let value_str = value.to_str().map_err(|_| ApiError {
                     status: StatusCode::BAD_REQUEST,
-                    message: "Cabeçalho X-Tenant-ID contém caracteres inválidos.".to_string(),
+                    error: "Cabeçalho X-Tenant-ID contém caracteres inválidos.".to_string(),
+                    details: None,
+
                 })?;
 
                 // Tenta converter a string para um UUID
                 let tenant_id = Uuid::parse_str(value_str).map_err(|_| ApiError {
                     status: StatusCode::BAD_REQUEST,
-                    message: "Cabeçalho X-Tenant-ID inválido (não é um UUID).".to_string(),
+                    error: "Cabeçalho X-Tenant-ID inválido (não é um UUID).".to_string(),
+                    details: None
                 })?;
 
                 // Sucesso! Retorna o contexto.
@@ -51,7 +55,8 @@ where
                 // Erro: O cabeçalho está em falta.
                 Err(ApiError {
                     status: StatusCode::BAD_REQUEST,
-                    message: "O cabeçalho X-Tenant-ID é obrigatório.".to_string(),
+                    error: "O cabeçalho X-Tenant-ID é obrigatório.".to_string(),
+                    details: None
                 })
             }
         }

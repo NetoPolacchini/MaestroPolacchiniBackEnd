@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="SqlDialectMappings">
+    <file url="file://$PROJECT_DIR$/migrations/20250912013013_create_users_table.sql" dialect="GenericSQL" />
     <file url="file://$PROJECT_DIR$/migrations/20251118000130_create_tenancy_and_inventory_schema.sql" dialect="GenericSQL" />
+    <file url="file://$PROJECT_DIR$/migrations/20251118025029_enable_row_level_security.sql" dialect="GenericSQL" />
   </component>
 </project>

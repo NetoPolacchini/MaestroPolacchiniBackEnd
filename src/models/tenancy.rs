@@ -41,6 +41,7 @@ pub struct StockPool {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub name: String,
+    pub description: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -19,7 +19,7 @@ mod services;
 // Importações principais
 use crate::config::AppState;
 //use crate::handlers; 
-use crate::middleware::auth::auth_middleware; // Esta linha agora vai funcionar!
+use crate::middleware::auth::{auth_guard, tenant_guard};
 
 #[tokio::main]
 async fn main() {
@@ -52,7 +52,7 @@ async fn main() {
         .route("/me", get(handlers::auth::get_me))
         .layer(axum_middleware::from_fn_with_state(
             app_state.clone(),
-            auth_middleware,
+            auth_guard,
         ));
 
     let inventory_routes = Router::new()
@@ -60,28 +60,63 @@ async fn main() {
                ,post(handlers::inventory::create_item)
                .get(handlers::inventory::get_all_items)
         )
-
         .route("/units"
                ,post(handlers::inventory::create_unit_of_measure)
                .get(handlers::inventory::get_all_units)
         )
-
         .route("/categories"
                ,post(handlers::inventory::create_category)
                .get(handlers::inventory::get_all_categories)
         )
+        .route("/sell"
+               ,post(handlers::inventory::sell_item)
+        )
+        .route("/stock-entry"
+               ,post(handlers::inventory::add_stock)
+        )
 
         .layer(axum_middleware::from_fn_with_state(
             app_state.clone(),
-            auth_middleware,
+            tenant_guard,
         ));
 
     let tenancy_routes = Router::new()
-        .route("/", post(handlers::tenancy::create_tenant))
-        // (Futuramente: .get(handlers::tenancy::get_my_tenants))
+        .route("/"
+               ,post(handlers::tenancy::create_tenant)
+               .get(handlers::tenancy::list_my_tenants)
+        )
+
         .layer(axum_middleware::from_fn_with_state(
             app_state.clone(),
-            auth_middleware,
+            auth_guard,
+        ));
+
+    let tenant_setup_routes = Router::new()
+        .route("/pools"
+               ,post(handlers::tenancy::create_stock_pool))
+        .route("/locations"
+               ,post(handlers::tenancy::create_location))
+
+        .layer(axum_middleware::from_fn_with_state(
+            app_state.clone(),
+            tenant_guard,
+        ));
+
+    let crm_routes = Router::new()
+        // Configuração de Campos
+        .route("/fields"
+               ,post(handlers::crm::create_field_definition)
+               .get(handlers::crm::list_field_definitions)
+        )
+        // Gestão de Clientes
+        .route("/customers"
+               ,post(handlers::crm::create_customer)
+               .get(handlers::crm::list_customers)
+        )
+        // Aplica o middleware de Auth + Tenancy em tudo
+        .layer(axum_middleware::from_fn_with_state(
+            app_state.clone(),
+            tenant_guard,
         ));
 
     // Combina tudo no router principal
@@ -91,6 +126,8 @@ async fn main() {
         .nest("/api/users", user_routes)
         .nest("/api/inventory", inventory_routes)
         .nest("/api/tenants", tenancy_routes)
+        .nest("/api/tenants/setup", tenant_setup_routes)
+        .nest("/api/crm", crm_routes)
         .with_state(app_state);
 
     // Inicia o servidor

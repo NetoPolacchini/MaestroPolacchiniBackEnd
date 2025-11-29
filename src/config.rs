@@ -5,13 +5,15 @@ use crate::services::{
     auth::AuthService,
     inventory_service::InventoryService,
     tenancy_service::TenantService,
+    crm_service::CrmService,
 };
 
 // Importe dos repositórios
 use crate::db::{
     UserRepository,
     InventoryRepository,
-    TenantRepository
+    TenantRepository,
+    CrmRepository
 };
 
 use sqlx::{postgres::PgPoolOptions, PgPool};
@@ -32,6 +34,8 @@ pub struct AppState {
     pub inventory_repo: InventoryRepository,
     pub tenant_repo: TenantRepository,
     pub tenant_service: TenantService,
+    pub crm_repo: CrmRepository,
+    pub crm_service: CrmService,
 }
 
 // Uma função helper para carregar os arquivos
@@ -75,11 +79,13 @@ impl AppState {
         let user_repo = UserRepository::new(db_pool.clone());
         let inventory_repo = InventoryRepository::new(db_pool.clone());
         let tenant_repo = TenantRepository::new(db_pool.clone());
+        let crm_repo = CrmRepository::new(db_pool.clone());
 
         // Serviços
         let auth_service = AuthService::new(user_repo, jwt_secret.clone());
         let inventory_service = InventoryService::new(inventory_repo.clone(), db_pool.clone());
         let tenant_service = TenantService::new(tenant_repo.clone(), db_pool.clone());
+        let crm_service = CrmService::new(crm_repo.clone());
 
         // Retorna Ok com o estado montado
         Ok(Self {
@@ -90,7 +96,9 @@ impl AppState {
             inventory_service,
             inventory_repo,
             tenant_repo,
-            tenant_service
+            tenant_service,
+            crm_repo,
+            crm_service
         })
     }
 }
