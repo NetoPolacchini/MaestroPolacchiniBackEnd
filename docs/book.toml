@@ -1,0 +1,14 @@
+[book]
+title = "Maestro Docs"
+authors = ["Neto Polacchini"]
+language = "pt-BR"
+src = "src"
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+renderer = ["html"]
+
+[output]
+
+[output.html]
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
