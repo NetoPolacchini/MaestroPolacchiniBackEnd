@@ -10,7 +10,7 @@ use crate::{
     common::error::AppError,
     models::crm::{CrmFieldDefinition, CrmFieldType, Customer},
 };
-use crate::models::auth::DocumentType;
+use crate::models::auth::{DocumentType, UserCompany};
 
 #[derive(Clone)]
 pub struct CrmRepository {
@@ -285,6 +285,34 @@ impl CrmRepository {
             .await?;
 
         Ok(result.rows_affected())
+    }
+
+    /// Encontra as companies que o usuário possui um registro
+    pub async fn find_companies_by_user<'e, E>(
+        &self,
+        executor: E,
+        user_id: Uuid,
+    ) -> Result<Vec<UserCompany>, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        // Fazemos um JOIN para pegar o nome da loja (tenants)
+        // Baseado no vínculo que existe na tabela customers
+        let companies = sqlx::query_as!(
+            UserCompany,
+            r#"
+            SELECT DISTINCT t.id, t.name, t.slug
+            FROM tenants t
+            INNER JOIN customers c ON c.tenant_id = t.id
+            WHERE c.user_id = $1
+            ORDER BY t.name ASC
+            "#,
+            user_id
+        )
+            .fetch_all(executor)
+            .await?;
+
+        Ok(companies)
     }
 
 }

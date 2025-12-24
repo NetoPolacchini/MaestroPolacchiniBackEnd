@@ -50,6 +50,7 @@ async fn main() {
     // Define as rotas de usuário (protegidas pelo middleware)
     let user_routes = Router::new()
         .route("/me", get(handlers::auth::get_me))
+        .route("/me/companies", get(handlers::auth::get_my_companies))
         .layer(axum_middleware::from_fn_with_state(
             app_state.clone(),
             auth_guard,
