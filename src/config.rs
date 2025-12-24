@@ -82,7 +82,12 @@ impl AppState {
         let crm_repo = CrmRepository::new(db_pool.clone());
 
         // Serviços
-        let auth_service = AuthService::new(user_repo, jwt_secret.clone());
+        let auth_service = AuthService::new(
+            user_repo.clone(),
+            crm_repo.clone(),
+            jwt_secret.clone(),
+            db_pool.clone()
+        );
         let inventory_service = InventoryService::new(inventory_repo.clone(), db_pool.clone());
         let tenant_service = TenantService::new(tenant_repo.clone(), db_pool.clone());
         let crm_service = CrmService::new(crm_repo.clone());

@@ -4,27 +4,41 @@ use bcrypt::{hash, verify};
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use uuid::Uuid;
+use crate::models::auth::DocumentType;
+use sqlx::PgPool; // <--- Importe o PgPool
 
 use crate::{
     common::error::AppError,
-    db::UserRepository,
+    db::{UserRepository, CrmRepository},
     models::auth::{Claims, User},
 };
 
 #[derive(Clone)]
 pub struct AuthService {
     user_repo: UserRepository,
+    crm_repo: CrmRepository,
     jwt_secret: String,
+    pool: PgPool,
 }
 
 impl AuthService {
-    // ASSINATURA CORRIGIDA:
-    // Agora aceita as dependências explícitas, em vez do AppState inteiro.
-    pub fn new(user_repo: UserRepository, jwt_secret: String) -> Self {
-        Self { user_repo, jwt_secret }
+    pub fn new(
+        user_repo: UserRepository,
+        crm_repo: CrmRepository, // <--- Novo argumento
+        jwt_secret: String,
+        pool: PgPool
+    ) -> Self {
+        Self { user_repo, crm_repo, jwt_secret, pool }
     }
 
-    pub async fn register_user(&self, email: &str, password: &str) -> Result<String, AppError> {
+    pub async fn register_user(
+        &self,
+        email: &str,
+        password: &str,
+        country_code: Option<String>,
+        document_type: Option<DocumentType>,
+        document_number: Option<String>,
+    ) -> Result<String, AppError> {
         let password_clone = password.to_owned();
 
         // Executa o hash em um thread separado para não bloquear o servidor
@@ -35,7 +49,35 @@ impl AuthService {
         .map_err(|e| anyhow::anyhow!("Falha na task de hashing: {}", e))? // Erro da task
         ?; // Erro do bcrypt, convertido automaticamente para AppError
 
-        let new_user = self.user_repo.create_user(email, &hashed_password).await?;
+        let new_user = self.user_repo
+            .create_user(
+                &self.pool,
+                &email,
+                &hashed_password, // <--- 2. CORREÇÃO: O nome da variável correta é hashed_password
+                country_code.as_deref(),
+                document_type.clone(),
+                document_number.as_deref()
+            )
+            .await?;
+
+        // 2. O LINK MÁGICO 
+        // Se o usuário informou documentos, tentamos vincular
+        if let (Some(cc), Some(dt), Some(dn)) = (&country_code, &document_type, &document_number) {
+            let count = self.crm_repo
+                .link_user_to_existing_customers(
+                    &self.pool,
+                    new_user.id,
+                    cc,
+                    dt.clone(),
+                    dn
+                )
+                .await?;
+
+            if count > 0 {
+                tracing::info!("🔗 Usuário {} vinculado a {} registros de cliente existentes!", new_user.id, count);
+            }
+        }
+
         self.create_token(new_user.id)
     }
 

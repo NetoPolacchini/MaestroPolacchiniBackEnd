@@ -5,10 +5,12 @@ use uuid::Uuid;
 use serde_json::Value;
 use chrono::NaiveDate;
 
+
 use crate::{
     common::error::AppError,
     models::crm::{CrmFieldDefinition, CrmFieldType, Customer},
 };
+use crate::models::auth::DocumentType;
 
 #[derive(Clone)]
 pub struct CrmRepository {
@@ -107,43 +109,62 @@ impl CrmRepository {
     // =========================================================================
 
     /// Cria um cliente com dados flexíveis
+    /// Cria um cliente com dados flexíveis
     pub async fn create_customer<'e, E>(
         &self,
         executor: E,
         tenant_id: Uuid,
         full_name: &str,
+        // [ATUALIZADO] Novos argumentos para identidade global
+        country_code: Option<&str>,
+        document_type: Option<DocumentType>,
         document_number: Option<&str>,
+        // ---------------------------------------------------
         birth_date: Option<NaiveDate>,
         email: Option<&str>,
         phone: Option<&str>,
         mobile: Option<&str>,
-        address: Option<&Value>,    // JSON do endereço
-        tags: Option<&[String]>,    // Array de strings (tags)
-        custom_data: &Value,        // O JSON mágico com os campos personalizados
+        address: Option<&Value>,
+        tags: Option<&[String]>,
+        custom_data: &Value,
     ) -> Result<Customer, AppError>
     where
         E: Executor<'e, Database = Postgres>,
     {
+        // Define padrões caso venha nulo (igual fizemos no UserRepo)
+        let final_country = country_code.unwrap_or("BR");
+        let final_doc_type = document_type.unwrap_or(DocumentType::TaxId);
+
         let customer = sqlx::query_as!(
             Customer,
             r#"
             INSERT INTO customers (
-                tenant_id, full_name, document_number, birth_date,
-                email, phone, mobile, address, tags, custom_data
+                tenant_id, full_name,
+                country_code, document_type, document_number,
+                birth_date, email, phone, mobile, address, tags, custom_data
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            RETURNING *
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            RETURNING
+                id, tenant_id, user_id, full_name, birth_date,
+                email, phone, mobile, address, tags, custom_data,
+                country_code,
+                -- CAST EXPLÍCITO OBRIGATÓRIO:
+                document_type as "document_type: DocumentType",
+                document_number,
+                created_at, updated_at
             "#,
             tenant_id,
             full_name,
-            document_number,
-            birth_date,
-            email,
-            phone,
-            mobile,
-            address,
-            tags as Option<&[String]>, // Cast importante para array de texto
-            custom_data
+            final_country,               // $3
+            final_doc_type as DocumentType, // $4
+            document_number,             // $5
+            birth_date,                  // $6
+            email,                       // $7
+            phone,                       // $8
+            mobile,                      // $9
+            address,                     // $10
+            tags as Option<&[String]>,   // $11
+            custom_data                  // $12
         )
             .fetch_one(executor)
             .await
@@ -171,9 +192,15 @@ impl CrmRepository {
         let customers = sqlx::query_as!(
             Customer,
             r#"
-            SELECT * FROM customers
+            SELECT
+                id, tenant_id, user_id, full_name, birth_date,
+                email, phone, mobile, address, tags, custom_data,
+                country_code,
+                document_type as "document_type: DocumentType",
+                document_number,
+                created_at, updated_at
+            FROM customers
             WHERE tenant_id = $1
-            ORDER BY full_name ASC
             "#,
             tenant_id
         )
@@ -197,10 +224,18 @@ impl CrmRepository {
     {
         let search_term = format!("%{}%", query);
 
+        // [CORREÇÃO] Removemos SELECT * e colocamos os campos explícitos com o CAST
         let customers = sqlx::query_as!(
             Customer,
             r#"
-            SELECT * FROM customers
+            SELECT
+                id, tenant_id, user_id, full_name, birth_date,
+                email, phone, mobile, address, tags, custom_data,
+                country_code,
+                document_type as "document_type: DocumentType",
+                document_number,
+                created_at, updated_at
+            FROM customers
             WHERE tenant_id = $1
             AND (
                 full_name ILIKE $2
@@ -218,4 +253,38 @@ impl CrmRepository {
 
         Ok(customers)
     }
+
+    /// O LINK MÁGICO: Vincula clientes órfãos ao usuário recém-criado
+    pub async fn link_user_to_existing_customers<'e, E>(
+        &self,
+        executor: E,
+        user_id: Uuid,
+        country_code: &str,
+        document_type: DocumentType,
+        document_number: &str,
+    ) -> Result<u64, AppError> // Retorna quantos registros foram atualizados
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let result = sqlx::query!(
+            r#"
+            UPDATE customers
+            SET user_id = $1, updated_at = NOW()
+            WHERE
+                country_code = $2
+                AND document_type = $3::document_type -- Cast importante!
+                AND document_number = $4
+                AND user_id IS NULL -- Só pega se não tiver dono ainda
+            "#,
+            user_id,
+            country_code,
+            document_type as DocumentType,
+            document_number
+        )
+            .execute(executor)
+            .await?;
+
+        Ok(result.rows_affected())
+    }
+
 }

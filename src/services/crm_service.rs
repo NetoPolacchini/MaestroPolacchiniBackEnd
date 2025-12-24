@@ -10,7 +10,7 @@ use crate::{
     db::CrmRepository,
     models::crm::{CrmFieldDefinition, CrmFieldType, Customer},
 };
-
+use crate::models::auth::DocumentType;
 #[derive(Clone)]
 pub struct CrmService {
     repo: CrmRepository,
@@ -61,34 +61,36 @@ impl CrmService {
         executor: E,
         tenant_id: Uuid,
         full_name: &str,
+        // [NOVOS ARGUMENTOS AQUI]
+        country_code: Option<&str>,
+        document_type: Option<DocumentType>,
         document_number: Option<&str>,
+        // -----------------------
         birth_date: Option<NaiveDate>,
         email: Option<&str>,
         phone: Option<&str>,
         mobile: Option<&str>,
         address: Option<Value>,
         tags: Option<Vec<String>>,
-        custom_data: Value, // O JSON que precisamos validar!
+        custom_data: Value,
     ) -> Result<Customer, AppError>
     where
         E: Executor<'e, Database = Postgres> + Acquire<'e, Database = Postgres>,
     {
         let mut tx = executor.begin().await?;
 
-        // 1. Busca o "Molde" (Definições) para saber o que validar
         let definitions = self.repo.list_field_definitions(&mut *tx, tenant_id).await?;
-
-        // 2. Valida o JSON de entrada contra o Molde
         self.validate_custom_data(&definitions, &custom_data)?;
 
-        // 3. Se passou, salva no banco
-        // (Convertemos Vec<String> para slice &[String] para o SQLx aceitar)
         let tags_slice = tags.as_deref();
 
+        // [CHAMADA ATUALIZADA AO REPOSITÓRIO]
         let customer = self.repo.create_customer(
             &mut *tx,
             tenant_id,
             full_name,
+            country_code,    // Passando o novo arg
+            document_type,   // Passando o novo arg
             document_number,
             birth_date,
             email,

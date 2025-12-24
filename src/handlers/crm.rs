@@ -18,6 +18,7 @@ use crate::{
     middleware::{tenancy::TenantContext, i18n::Locale},
     models::crm::{CrmFieldDefinition, CrmFieldType, Customer},
 };
+use crate::models::auth::DocumentType;
 
 // =============================================================================
 //  ÁREA 1: CONFIGURAÇÃO (DEFINIÇÕES DE CAMPO)
@@ -90,7 +91,15 @@ pub struct CreateCustomerPayload {
     #[validate(length(min = 1, message = "required"))]
     pub full_name: String,
 
+    // [NOVOS CAMPOS NO JSON]
+    #[validate(length(equal = 2, message = "invalid_country_code"))]
+    pub country_code: Option<String>,
+
+    pub document_type: Option<DocumentType>,
+
     pub document_number: Option<String>,
+    // ----------------------
+
     pub birth_date: Option<NaiveDate>,
 
     #[validate(email(message = "invalid_email"))]
@@ -102,8 +111,7 @@ pub struct CreateCustomerPayload {
     pub address: Option<Value>,
     pub tags: Option<Vec<String>>,
 
-    // O JSONMágico!
-    #[serde(default)] // Se não vier, assume null/vazio
+    #[serde(default)]
     pub custom_data: Value,
 }
 
@@ -117,14 +125,16 @@ pub async fn create_customer(
     payload.validate()
         .map_err(|e| AppError::ValidationError(e).to_api_error(&locale, &app_state.i18n_store))?;
 
-    // Aqui chamamos o SERVICE, não o Repo.
-    // O Service é quem vai validar se o 'customData' bate com as definições.
-    let customer = app_state.crm_service // Você precisará adicionar crm_service no AppState se ainda não fez!
+    let customer = app_state.crm_service
         .create_customer(
             &app_state.db_pool,
             tenant.0,
             &payload.full_name,
+            // [REPASSANDO NOVOS DADOS]
+            payload.country_code.as_deref(),
+            payload.document_type,
             payload.document_number.as_deref(),
+            // ------------------------
             payload.birth_date,
             payload.email.as_deref(),
             payload.phone.as_deref(),

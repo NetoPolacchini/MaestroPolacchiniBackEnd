@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 use serde_json::Value; // <--- A chave para o JSONB
+use crate::models::auth::DocumentType; // Ajuste conforme seu caminho de arquivo
 
 // --- ENUMS ---
 
@@ -50,8 +51,9 @@ pub struct Customer {
     pub id: Uuid,
     pub tenant_id: Uuid,
 
+    pub user_id: Option<Uuid>,
+
     pub full_name: String,
-    pub document_number: Option<String>,
     pub birth_date: Option<NaiveDate>,
 
     pub email: Option<String>,
@@ -69,6 +71,11 @@ pub struct Customer {
     // CAMPOS PERSONALIZADOS
     // Aqui vai o { "weight": 80, "team": "Flamengo" }
     pub custom_data: Value,
+
+    // [ATUALIZADO] Identidade Global
+    pub country_code: Option<String>,
+    pub document_type: Option<DocumentType>,
+    pub document_number: Option<String>, // O antigo era só document_number
 
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
