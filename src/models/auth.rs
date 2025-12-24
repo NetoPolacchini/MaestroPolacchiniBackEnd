@@ -1,4 +1,4 @@
-// src/models/login
+// src/models/auth
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,14 @@ pub struct User {
     // Campos de data/hora que estavam faltando
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct UserCompany {
+    pub id: Uuid,   // ID da Loja (Tenant)
+    pub name: String, // Nome da Loja
+    pub slug: String, // Slug (útil para links)
 }
 
 // Dados para registro de um novo usuário

@@ -4,5 +4,6 @@
     <file url="file://$PROJECT_DIR$/migrations/20250912013013_create_users_table.sql" dialect="GenericSQL" />
     <file url="file://$PROJECT_DIR$/migrations/20251118000130_create_tenancy_and_inventory_schema.sql" dialect="GenericSQL" />
     <file url="file://$PROJECT_DIR$/migrations/20251118025029_enable_row_level_security.sql" dialect="GenericSQL" />
+    <file url="file://$PROJECT_DIR$/migrations/20251224125402_add_slug_to_tenants.sql" dialect="GenericSQL" />
   </component>
 </project>

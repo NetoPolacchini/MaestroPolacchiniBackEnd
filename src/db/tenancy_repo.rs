@@ -84,29 +84,43 @@ impl TenantRepository {
     /// [NOVO] Cria um novo tenant (Estabelecimento) na base de dados.
     pub async fn create_tenant<'e, E>(
         &self,
-        executor: E, // Aceita um executor (pool ou transação)
+        executor: E,
         name: &str,
         description: Option<&str>,
     ) -> Result<Tenant, AppError>
     where
         E: Executor<'e, Database = Postgres>,
     {
-        sqlx::query_as!(
+        // 1. Gera um Slug simples (Ex: "padaria-do-ze-a1b2")
+        // Usamos uuid parcial para garantir unicidade sem complicar muito agora
+        let clean_name = name.to_lowercase().replace(" ", "-");
+        let random_suffix = Uuid::new_v4().to_string(); // Pega um UUID novo
+        let slug = format!("{}-{}", clean_name, &random_suffix[0..4]);
+
+        let tenant = sqlx::query_as!(
             Tenant,
             r#"
-            INSERT INTO tenants (name, description)
-            VALUES ($1, $2)
+            INSERT INTO tenants (name, description, slug)
+            VALUES ($1, $2, $3)
             RETURNING *
             "#,
             name,
-            description
+            description,
+            slug
         )
             .fetch_one(executor)
             .await
             .map_err(|e| {
-                // (Futuramente, podemos adicionar verificação de nome de tenant duplicado aqui)
+                // Tratamento básico de erro (caso dê azar de gerar slug igual)
+                if let sqlx::Error::Database(db_err) = &e {
+                    if db_err.is_unique_violation() {
+                        return AppError::UniqueConstraintViolation("Já existe uma loja com este link.".into());
+                    }
+                }
                 e.into()
-            })
+            })?;
+
+        Ok(tenant)
     }
 
     /// [NOVO] Atribui um utilizador a um tenant (na tabela-ponte).
