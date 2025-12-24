@@ -120,15 +120,22 @@ async fn main() {
             tenant_guard,
         ));
 
+    let rbac_routes = Router::new()
+        .route("/roles", post(handlers::rbac::create_role));
+
     // Combina tudo no router principal
     let app = Router::new()
         .route("/api/health", get(|| async { "OK" }))
+        .route("/api/permissions", get(handlers::rbac::list_permissions))
         .nest("/api/auth", auth_routes)
         .nest("/api/users", user_routes)
         .nest("/api/inventory", inventory_routes)
         .nest("/api/tenants", tenancy_routes)
         .nest("/api/tenants/setup", tenant_setup_routes)
         .nest("/api/crm", crm_routes)
+        .nest("/api/tenants", rbac_routes.layer(
+            axum_middleware::from_fn_with_state(app_state.clone(), tenant_guard)
+        ))
         .with_state(app_state);
 
     // Inicia o servidor

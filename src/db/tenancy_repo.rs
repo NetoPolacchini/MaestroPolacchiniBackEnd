@@ -1,9 +1,11 @@
 // src/db/tenancy_repo.rs
 
-use sqlx::{PgPool, Postgres, Executor};
+use sqlx::{PgPool, Postgres, Executor}; // Removi PgConnection que não estava a ser usado explicitamente
 use uuid::Uuid;
 use crate::common::error::AppError;
- use crate::models::tenancy::{Tenant, UserTenant, StockPool, Location};
+use crate::models::tenancy::{Tenant, StockPool, Location};
+// Nota: Não precisamos importar TenantMember aqui a não ser que o retornemos,
+// mas as queries usam Tenant, StockPool, Location.
 
 #[derive(Clone)]
 pub struct TenantRepository {
@@ -15,15 +17,15 @@ impl TenantRepository {
         Self { pool }
     }
 
-
     /// Verifica se um utilizador já possui um tenant com um nome específico.
+    /// Atualizado para verificar na tabela tenant_members.
     pub async fn user_has_tenant_with_name(&self, user_id: Uuid, name: &str) -> Result<bool, AppError> {
         let result = sqlx::query!(
             r#"
             SELECT EXISTS (
                 SELECT 1 FROM tenants t
-                JOIN user_tenants ut ON t.id = ut.tenant_id
-                WHERE ut.user_id = $1 AND t.name = $2
+                JOIN tenant_members tm ON t.id = tm.tenant_id
+                WHERE tm.user_id = $1 AND t.name = $2
             )
             "#,
             user_id,
@@ -35,14 +37,15 @@ impl TenantRepository {
         Ok(result.exists.unwrap_or(false))
     }
 
-    /// Retorna todos os tenants aos quais o utilizador tem acesso.
+    /// Retorna todos os tenants ativos aos quais o utilizador tem acesso.
+    /// Atualizado para usar tenant_members e verificar is_active.
     pub async fn get_tenants_for_user(&self, user_id: Uuid) -> Result<Vec<Tenant>, AppError> {
         let tenants = sqlx::query_as!(
             Tenant,
             r#"
             SELECT t.* FROM tenants t
-            JOIN user_tenants ut ON t.id = ut.tenant_id
-            WHERE ut.user_id = $1
+            JOIN tenant_members tm ON t.id = tm.tenant_id
+            WHERE tm.user_id = $1 AND tm.is_active = true
             ORDER BY t.name ASC
             "#,
             user_id
@@ -53,22 +56,18 @@ impl TenantRepository {
         Ok(tenants)
     }
 
-
-    /// Verifica se um utilizador tem permissão para aceder a um tenant.
-    /// Esta é a verificação de segurança de autorização mais importante.
+    /// Verifica permissão de acesso (Authorization).
+    /// Atualizado para tenant_members.
     pub async fn check_user_tenancy(
         &self,
         user_id: Uuid,
         tenant_id: Uuid,
     ) -> Result<bool, AppError> {
-
-        // Usamos SELECT EXISTS para a consulta mais rápida possível.
-        // Ele apenas retorna 'true' ou 'false' se a linha for encontrada.
         let result = sqlx::query!(
             r#"
             SELECT EXISTS (
-                SELECT 1 FROM user_tenants
-                WHERE user_id = $1 AND tenant_id = $2
+                SELECT 1 FROM tenant_members
+                WHERE user_id = $1 AND tenant_id = $2 AND is_active = true
             )
             "#,
             user_id,
@@ -77,11 +76,10 @@ impl TenantRepository {
             .fetch_one(&self.pool)
             .await?;
 
-        // Se 'exists' não for nulo e for 'true', o acesso é permitido.
         Ok(result.exists.unwrap_or(false))
     }
 
-    /// [NOVO] Cria um novo tenant (Estabelecimento) na base de dados.
+    /// Cria um novo tenant com Slug gerado.
     pub async fn create_tenant<'e, E>(
         &self,
         executor: E,
@@ -91,10 +89,9 @@ impl TenantRepository {
     where
         E: Executor<'e, Database = Postgres>,
     {
-        // 1. Gera um Slug simples (Ex: "padaria-do-ze-a1b2")
-        // Usamos uuid parcial para garantir unicidade sem complicar muito agora
+        // Gera slug simples: "nome-loja-uuid"
         let clean_name = name.to_lowercase().replace(" ", "-");
-        let random_suffix = Uuid::new_v4().to_string(); // Pega um UUID novo
+        let random_suffix = Uuid::new_v4().to_string();
         let slug = format!("{}-{}", clean_name, &random_suffix[0..4]);
 
         let tenant = sqlx::query_as!(
@@ -111,7 +108,6 @@ impl TenantRepository {
             .fetch_one(executor)
             .await
             .map_err(|e| {
-                // Tratamento básico de erro (caso dê azar de gerar slug igual)
                 if let sqlx::Error::Database(db_err) = &e {
                     if db_err.is_unique_violation() {
                         return AppError::UniqueConstraintViolation("Já existe uma loja com este link.".into());
@@ -123,30 +119,42 @@ impl TenantRepository {
         Ok(tenant)
     }
 
-    /// [NOVO] Atribui um utilizador a um tenant (na tabela-ponte).
-    pub async fn assign_user_to_tenant<'e, E>(
+    /// [NOVO MÉTODO] Adiciona membro com Cargo (Role).
+    /// Substitui o antigo assign_user_to_tenant.
+    pub async fn add_member_to_tenant<'e, E>(
         &self,
-        executor: E, // Aceita um executor (pool ou transação)
-        user_id: Uuid,
+        executor: E,
         tenant_id: Uuid,
-    ) -> Result<UserTenant, AppError>
+        user_id: Uuid,
+        role_id: Uuid, // <--- Agora exigimos o Cargo
+    ) -> Result<(), AppError>
     where
         E: Executor<'e, Database = Postgres>,
     {
-        sqlx::query_as!(
-            UserTenant,
+        sqlx::query!(
             r#"
-            INSERT INTO user_tenants (user_id, tenant_id)
-            VALUES ($1, $2)
-            RETURNING *
+            INSERT INTO tenant_members (tenant_id, user_id, role_id, is_active)
+            VALUES ($1, $2, $3, true)
             "#,
+            tenant_id,
             user_id,
-            tenant_id
+            role_id
         )
-            .fetch_one(executor)
+            .execute(executor)
             .await
-            .map_err(|e| e.into()) // Erros de chave duplicada são tratados pelo serviço
+            .map_err(|e| {
+                if let sqlx::Error::Database(db_err) = &e {
+                    if db_err.is_unique_violation() {
+                        return AppError::UniqueConstraintViolation("Usuário já é membro desta loja.".into());
+                    }
+                }
+                e.into()
+            })?;
+
+        Ok(())
     }
+
+    // --- Métodos de Estoque/Pool (Mantidos do original) ---
 
     pub async fn create_stock_pool<'e, E>(
         &self,
@@ -216,10 +224,9 @@ impl TenantRepository {
             })
     }
 
-    // [NOVO] Método para buscar todas as lojas de um tenant
     pub async fn find_all_locations<'e, E>(
         &self,
-        executor: E, // Aceita conexão ou transação (flexibilidade)
+        executor: E,
         tenant_id: Uuid
     ) -> Result<Vec<Location>, AppError>
     where
@@ -227,17 +234,12 @@ impl TenantRepository {
     {
         let locations = sqlx::query_as!(
             Location,
-            r#"
-            SELECT * FROM locations
-            WHERE tenant_id = $1
-            ORDER BY name ASC
-            "#,
+            r#"SELECT * FROM locations WHERE tenant_id = $1 ORDER BY name ASC"#,
             tenant_id
         )
             .fetch_all(executor)
-            .await?; // Se der erro de banco, o '?' propaga
+            .await?;
 
         Ok(locations)
     }
-
 }

@@ -48,7 +48,7 @@ pub async fn create_tenant(
     // Por isso, chamamos um "Serviço", que ainda não criámos.
     let new_tenant = app_state
         .tenant_service
-        .create_tenant_and_assign_owner(
+        .create_tenant_with_owner(
             &payload.name,
             payload.description.as_deref(),
             user.0.id,

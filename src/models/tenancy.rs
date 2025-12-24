@@ -8,34 +8,35 @@ use uuid::Uuid;
 // ---
 // 1. Tenant (O "Estabelecimento")
 // ---
-// A conta principal (Loja, Restaurante, Academia)
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct Tenant {
     pub id: Uuid,
     pub name: String,
-    pub slug: String,
+    pub slug: String, // Já está correto aqui
     pub description: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 // ---
-// 2. UserTenant (A "Ponte" Usuário-Tenant)
+// 2. TenantMember (A Nova "Ponte" com Cargos)
 // ---
-// Liga um Usuário a um Estabelecimento
+// Substitui o antigo UserTenant para suportar RBAC
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
-pub struct UserTenant {
-    pub user_id: Uuid,
+pub struct TenantMember {
+    pub id: Uuid,
     pub tenant_id: Uuid,
-    pub created_at: DateTime<Utc>,
+    pub user_id: Uuid,
+    pub role_id: Uuid, // <--- O campo crucial
+    pub is_active: bool,
+    pub joined_at: Option<DateTime<Utc>>,
 }
 
 // ---
-// 3. StockPool (A "Piscina de Estoque")
+// 3. StockPool
 // ---
-// O grupo de locais que partilham visibilidade de estoque
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct StockPool {
@@ -48,20 +49,15 @@ pub struct StockPool {
 }
 
 // ---
-// 4. Location (O "Local")
+// 4. Location
 // ---
-// O local físico do estoque (Loja A, Loja B, Barracão)
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct Location {
     pub id: Uuid,
     pub tenant_id: Uuid,
-
-    // ATUALIZADO: Agora liga-se ao StockPool
     pub stock_pool_id: Uuid,
-
     pub name: String,
-    // 'true' para o seu "Barracão" (apenas estoque, sem vendas)
     pub is_warehouse: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
