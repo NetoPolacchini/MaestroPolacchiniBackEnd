@@ -113,4 +113,34 @@ impl RbacRepository {
 
         Ok(permissions)
     }
+
+    pub async fn user_has_permission(
+        &self,
+        user_id: Uuid,
+        tenant_id: Uuid,
+        permission_slug: &str,
+    ) -> Result<bool, AppError> {
+        let result = sqlx::query!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM tenant_members tm
+                JOIN roles r ON tm.role_id = r.id
+                JOIN role_permissions rp ON r.id = rp.role_id
+                JOIN permissions p ON rp.permission_id = p.id
+                WHERE tm.user_id = $1
+                  AND tm.tenant_id = $2
+                  AND tm.is_active = true
+                  AND p.slug = $3
+            )
+            "#,
+            user_id,
+            tenant_id,
+            permission_slug
+        )
+            .fetch_one(&self.pool)
+            .await?;
+
+        Ok(result.exists.unwrap_or(false))
+    }
 }
