@@ -10,7 +10,7 @@ use crate::{
     db::CrmRepository,
     models::crm::{CrmFieldDefinition, CrmFieldType, Customer},
 };
-use crate::models::auth::DocumentType;
+use crate::models::auth::{DocumentType, UserCompany};
 #[derive(Clone)]
 pub struct CrmService {
     repo: CrmRepository,
@@ -171,5 +171,29 @@ impl CrmService {
         err.add(static_field, validation_err);
 
         AppError::ValidationError(err)
+    }
+
+    // Sim, é chato escrever isso agora, mas protege seu futuro.
+    pub async fn find_companies_by_user<'e, E>(
+        &self,
+        executor: E,
+        user_id: Uuid,
+    ) -> Result<Vec<UserCompany>, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        self.repo.find_companies_by_user(executor, user_id).await
+    }
+
+    pub async fn list_customers<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+    ) -> Result<Vec<Customer>, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        // No futuro, se precisar filtrar por permissão ou status, é aqui.
+        self.repo.list_customers(executor, tenant_id).await
     }
 }

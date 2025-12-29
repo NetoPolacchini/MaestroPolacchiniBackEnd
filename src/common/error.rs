@@ -31,6 +31,15 @@ pub enum AppError {
 
     #[error("SKU já existe")]
     SkuAlreadyExists,
+    
+    #[error("Documento já está cadastrado")]
+    DocumentAlreadyExists,
+
+    #[error("Pool '{0}' já existe")]
+    PoolAlreadyExists(String),
+
+    #[error("Location '{0}' já existe")]
+    LocationAlreadyExists(String),
 
     #[error("O nome da unidade já existe: {0}")]
     UnitNameAlreadyExists(String),
@@ -47,6 +56,15 @@ pub enum AppError {
     #[error("Você já possui um estabelecimento com o nome: {0}")]
     TenantNameAlreadyExists(String),
 
+    #[error("O usuário já é membro desta equipe")]
+    MemberAlreadyExists,
+
+    #[error("O cargo informado '{0}' não existe")]
+    RoleDoesNotExist(String),
+
+    #[error("O cargo informado '{0}' existe")]
+    RoleAlreadyExist(String),
+
     // Erros técnicos (wrappers)
     #[error("Erro de banco de dados")]
     DatabaseError(#[from] sqlx::Error),
@@ -62,6 +80,13 @@ pub enum AppError {
 
     #[error("Acesso Negado")]
     ForbiddenAccess,
+
+    #[error("Já existe um campo com esta chave")]
+    CrmFieldKeyAlreadyExists(String), // Recebe a chave duplicada
+
+    #[error("Cliente com documento duplicado")]
+    CustomerDocumentAlreadyExists(String), // Recebe o número do doc
+
 }
 
 // --- Estrutura de Resposta da API (JSON) ---
@@ -143,7 +168,8 @@ impl AppError {
             AppError::ValidationError(e) => tracing::warn!("⚠️ Validação falhou: {:?}", e),
             AppError::InvalidCredentials
             | AppError::EmailAlreadyExists
-            | AppError::SkuAlreadyExists => tracing::warn!("⚠️ Regra de negócio: {}", self),
+            | AppError::SkuAlreadyExists
+            | AppError::DocumentAlreadyExists => tracing::warn!("⚠️ Regra de negócio: {}", self),
 
             // Erros Críticos (Servidor quebrou) - Vermelho/Error
             AppError::DatabaseError(e) => tracing::error!("🔥 ERRO DE BANCO: {:?}", e),
@@ -172,7 +198,9 @@ impl AppError {
             AppError::InvalidToken => (StatusCode::UNAUTHORIZED, get_template("InvalidToken"), None),
             AppError::UserNotFound => (StatusCode::NOT_FOUND, get_template("UserNotFound"), None),
             AppError::SkuAlreadyExists => (StatusCode::CONFLICT, get_template("SkuAlreadyExists"), None),
+            AppError::DocumentAlreadyExists => (StatusCode::CONFLICT, get_template("DocumentAlreadyExists"), None),
             AppError::ForbiddenAccess => (StatusCode::FORBIDDEN, get_template("ForbiddenAccess"), None),
+            AppError::MemberAlreadyExists => (StatusCode::CONFLICT, get_template("MemberAlreadyExists"), None),
 
             // Erros Dinâmicos (com replace)
             AppError::UnitNameAlreadyExists(name) => {
@@ -194,6 +222,30 @@ impl AppError {
             AppError::UniqueConstraintViolation(val) => {
                 let t = get_template("UniqueConstraintViolation");
                 (StatusCode::CONFLICT, t.replace("{value}", &val), None)
+            }
+            AppError::RoleDoesNotExist(val) => {
+                let t = get_template("RoleDoesNotExist");
+                (StatusCode::CONFLICT, t.replace("{value}", &val), None)
+            }
+            AppError::RoleAlreadyExist(val) => {
+                let t = get_template("RoleAlreadyExist");
+                (StatusCode::CONFLICT, t.replace("{value}", &val), None)
+            }
+            AppError::PoolAlreadyExists(val) => {
+                let t = get_template("PoolAlreadyExists");
+                (StatusCode::CONFLICT, t.replace("{value}", &val), None)
+            }
+            AppError::LocationAlreadyExists(val) => {
+                let t = get_template("LocationAlreadyExists");
+                (StatusCode::CONFLICT, t.replace("{value}", &val), None)
+            }
+            AppError::CrmFieldKeyAlreadyExists(key) => {
+                let t = get_template("CrmFieldKeyAlreadyExists");
+                (StatusCode::CONFLICT, t.replace("{value}", &key), None)
+            }
+            AppError::CustomerDocumentAlreadyExists(doc) => {
+                let t = get_template("CustomerDocumentAlreadyExists");
+                (StatusCode::CONFLICT, t.replace("{value}", &doc), None)
             }
 
             // Erros Internos (escondemos os detalhes técnicos do usuário)

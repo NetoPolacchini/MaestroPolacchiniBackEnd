@@ -87,30 +87,65 @@ impl TenantRepository {
         description: Option<&str>,
     ) -> Result<Tenant, AppError>
     where
-        E: Executor<'e, Database = Postgres>,
+        E: Executor<'e, Database = Postgres>, // <--- 1. REMOVIDO O "+ Copy"
     {
-        // Gera slug simples: "nome-loja-uuid"
         let clean_name = name.to_lowercase().replace(" ", "-");
-        let random_suffix = Uuid::new_v4().to_string();
-        let slug = format!("{}-{}", clean_name, &random_suffix[0..4]);
+        let mut final_slug = String::new();
 
-        let tenant = sqlx::query_as!(
-            Tenant,
-            r#"
-            INSERT INTO tenants (name, description, slug)
-            VALUES ($1, $2, $3)
-            RETURNING *
-            "#,
-            name,
-            description,
-            slug
+        // 2. FASE DE GERAÇÃO (Usamos self.pool)
+        // Usamos a pool principal para verificar duplicidade.
+        // Isso é seguro, rápido e não consome a sua transação.
+        for _ in 0..8 {
+            let random_suffix = Uuid::new_v4().to_string();
+            // Use 6 chars para garantir entropia suficiente
+            let candidate_slug = format!("{}-{}", clean_name, &random_suffix[0..6]);
+
+            let exists = sqlx::query!(
+            "SELECT count(*) as count FROM tenants WHERE slug = $1",
+            candidate_slug
         )
-            .fetch_one(executor)
+                .fetch_one(&self.pool) // <--- TRUQUE: Usamos &self.pool aqui!
+                .await?
+                .count
+                .unwrap_or(0) > 0;
+
+            if !exists {
+                final_slug = candidate_slug;
+                break;
+            }
+
+            tracing::warn!("⚠️ Colisão de slug detectada: {}. Tentando novo...", candidate_slug);
+        }
+
+        if final_slug.is_empty() {
+            return Err(AppError::InternalServerError(anyhow::anyhow!("Falha ao gerar slug único após múltiplas tentativas")));
+        }
+
+        // 3. FASE DE INSERÇÃO (Usamos o Executor/Transação)
+        // Agora que temos um slug seguro, usamos a transação apenas uma vez.
+        let tenant = sqlx::query_as!(
+        Tenant,
+        r#"
+        INSERT INTO tenants (name, description, slug)
+        VALUES ($1, $2, $3)
+        RETURNING *
+        "#,
+        name,
+        description,
+        final_slug
+    )
+            .fetch_one(executor) // <--- O executor é movido aqui (tudo bem, é a última linha)
             .await
             .map_err(|e| {
+                // Se ainda assim der erro de Unique (chance de 0.000001%),
+                // infelizmente a transação terá que ser abortada.
                 if let sqlx::Error::Database(db_err) = &e {
                     if db_err.is_unique_violation() {
-                        return AppError::UniqueConstraintViolation("Já existe uma loja com este link.".into());
+                        if let Some(constraint) = db_err.constraint() {
+                            if constraint == "idx_tenants_slug" {
+                                return AppError::UniqueConstraintViolation("Erro raríssimo de colisão simultânea. Tente novamente.".into());
+                            }
+                        }
                     }
                 }
                 e.into()
@@ -126,26 +161,42 @@ impl TenantRepository {
         executor: E,
         tenant_id: Uuid,
         user_id: Uuid,
-        role_id: Uuid, // <--- Agora exigimos o Cargo
+        role_id: Uuid,
     ) -> Result<(), AppError>
     where
         E: Executor<'e, Database = Postgres>,
     {
         sqlx::query!(
-            r#"
-            INSERT INTO tenant_members (tenant_id, user_id, role_id, is_active)
-            VALUES ($1, $2, $3, true)
-            "#,
-            tenant_id,
-            user_id,
-            role_id
-        )
+        r#"
+        INSERT INTO tenant_members (tenant_id, user_id, role_id, is_active)
+        VALUES ($1, $2, $3, true)
+        "#,
+        tenant_id,
+        user_id,
+        role_id
+    )
             .execute(executor)
             .await
             .map_err(|e| {
                 if let sqlx::Error::Database(db_err) = &e {
+                    // 1. Checagem de Duplicidade (Já está na loja)
                     if db_err.is_unique_violation() {
-                        return AppError::UniqueConstraintViolation("Usuário já é membro desta loja.".into());
+                        if let Some(constraint) = db_err.constraint() {
+                            // Confirme se o nome é este mesmo no seu banco
+                            if constraint == "tenant_members_pkey" {
+                                return AppError::MemberAlreadyExists;
+                            }
+                        }
+                    }
+
+                    // 2. Checagem de Integridade (Role ou Tenant não existem)
+                    // O código 23503 é Foreign Key Violation
+                    if db_err.is_foreign_key_violation() {
+                        if let Some(constraint) = db_err.constraint() {
+                            if constraint == "tenant_members_role_id_fkey" {
+                                return AppError::RoleDoesNotExist(String::from(role_id));
+                            }
+                        }
                     }
                 }
                 e.into()
@@ -182,7 +233,7 @@ impl TenantRepository {
             .map_err(|e| {
                 if let sqlx::Error::Database(db_err) = &e {
                     if db_err.is_unique_violation() {
-                        return AppError::UniqueConstraintViolation(format!("Pool '{}' já existe", name));
+                        return AppError::PoolAlreadyExists(name.to_string());
                     }
                 }
                 e.into()
@@ -217,7 +268,7 @@ impl TenantRepository {
             .map_err(|e| {
                 if let sqlx::Error::Database(db_err) = &e {
                     if db_err.is_unique_violation() {
-                        return AppError::UniqueConstraintViolation(format!("Local '{}' já existe", name));
+                        return AppError::LocationAlreadyExists(name.to_string());
                     }
                 }
                 e.into()

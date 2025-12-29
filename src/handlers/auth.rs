@@ -3,8 +3,8 @@
 use axum::{extract::State, Json};
 use validator::Validate;
 
-use crate::middleware::i18n::Locale; // <-- Importe o Locale
-use crate::common::error::ApiError; // <-- Importe o novo ApiError
+use crate::middleware::i18n::Locale;
+use crate::common::error::ApiError;
 
 use crate::{
     common::error::AppError,
@@ -28,7 +28,6 @@ pub async fn register(
         .register_user(
             &payload.email,
             &payload.password,
-            // [NOVOS ARGUMENTOS] Repassando do payload para o serviço
             payload.country_code,
             payload.document_type,
             payload.document_number
@@ -41,7 +40,7 @@ pub async fn register(
 
 // Handler de login
 pub async fn login(
-    State(app_state): State<AppState>, // O AppState já contém o serviço
+    State(app_state): State<AppState>,
     locale: Locale,
     Json(payload): Json<LoginUserPayload>,
 ) -> Result<Json<AuthResponse>, ApiError> {
@@ -75,7 +74,7 @@ pub async fn get_my_companies(
     locale: Locale,
 ) -> Result<Json<Vec<UserCompany>>, ApiError> {
 
-    let companies = app_state.crm_repo
+    let companies = app_state.crm_service // <--- Mudamos para o Service
         .find_companies_by_user(&app_state.db_pool, user.id)
         .await
         .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;

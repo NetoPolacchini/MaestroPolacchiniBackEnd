@@ -39,48 +39,57 @@ impl AuthService {
         document_type: Option<DocumentType>,
         document_number: Option<String>,
     ) -> Result<String, AppError> {
+        // 1. Hashing (Isso pode ficar fora da transação, pois não toca no banco)
         let password_clone = password.to_owned();
-
-        // Executa o hash em um thread separado para não bloquear o servidor
         let hashed_password = tokio::task::spawn_blocking(move || {
             hash(&password_clone, bcrypt::DEFAULT_COST)
         })
-        .await
-        .map_err(|e| anyhow::anyhow!("Falha na task de hashing: {}", e))? // Erro da task
-        ?; // Erro do bcrypt, convertido automaticamente para AppError
+            .await
+            .map_err(|e| anyhow::anyhow!("Falha na task de hashing: {}", e))?
+            ?;
 
+        // --- INÍCIO DA TRANSAÇÃO ---
+        // Iniciamos uma transação no pool de conexões
+        let mut tx = self.pool.begin().await?;
+
+        // Note que passamos `&mut *tx` (o executor) em vez de `&self.pool`
+
+        // 2. Cria Usuário (Passando a transação)
         let new_user = self.user_repo
             .create_user(
-                &self.pool,
+                &mut *tx, // <--- AQUI A MÁGICA
                 &email,
-                &hashed_password, // <--- 2. CORREÇÃO: O nome da variável correta é hashed_password
+                &hashed_password,
                 country_code.as_deref(),
                 document_type.clone(),
                 document_number.as_deref()
             )
-            .await?;
+            .await?; // Se falhar aqui, o tx sofre rollback automático ao sair do escopo (drop)
 
-        // 2. O LINK MÁGICO 
-        // Se o usuário informou documentos, tentamos vincular
+        // 3. Link no CRM (Passando a mesma transação)
         if let (Some(cc), Some(dt), Some(dn)) = (&country_code, &document_type, &document_number) {
             let count = self.crm_repo
                 .link_user_to_existing_customers(
-                    &self.pool,
+                    &mut *tx, // <--- AQUI TAMBÉM
                     new_user.id,
                     cc,
                     dt.clone(),
                     dn
                 )
-                .await?;
+                .await?; // Se falhar aqui, o usuário criado acima é desfeito!
 
             if count > 0 {
-                tracing::info!("🔗 Usuário {} vinculado a {} registros de cliente existentes!", new_user.id, count);
+                tracing::info!("🔗 Usuário vinculado a {} clientes na transação.", count);
             }
         }
 
+        // 4. Se chegou aqui, deu tudo certo. "Commita" a transação.
+        tx.commit().await?;
+        // --- FIM DA TRANSAÇÃO ---
+
+        // 5. Gera o token (Isso não precisa de transação de banco)
         self.create_token(new_user.id)
     }
-
     pub async fn login_user(&self, email: &str, password: &str) -> Result<String, AppError> {
         let user = self.user_repo
             .find_by_email(email)

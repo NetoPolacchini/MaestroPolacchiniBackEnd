@@ -51,14 +51,14 @@ pub async fn create_field_definition(
     payload.validate()
         .map_err(|e| AppError::ValidationError(e).to_api_error(&locale, &app_state.i18n_store))?;
 
-    let field = app_state.crm_repo // Podemos chamar o repo direto aqui, ou criar um método no service
+    let field = app_state.crm_service
         .create_field_definition(
             &app_state.db_pool,
             tenant.0,
             &payload.name,
             &payload.key_name,
             payload.field_type,
-            payload.options.as_ref(),
+            payload.options,
             payload.is_required,
         )
         .await
@@ -73,7 +73,7 @@ pub async fn list_field_definitions(
     tenant: TenantContext,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let fields = app_state.crm_repo
+    let fields = app_state.crm_service
         .list_field_definitions(&app_state.db_pool, tenant.0)
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
@@ -156,7 +156,7 @@ pub async fn list_customers(
     tenant: TenantContext,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let customers = app_state.crm_repo
+    let customers = app_state.crm_service
         .list_customers(&app_state.db_pool, tenant.0)
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;

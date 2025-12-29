@@ -70,9 +70,10 @@ pub struct RegisterUserPayload {
 // Dados para login
 #[derive(Debug, Deserialize, Validate)]
 pub struct LoginUserPayload {
-    #[validate(email(message = "O e-mail fornecido é inválido."))]
+    #[validate(email)] // Usa o código padrão "email"
     pub email: String,
-    #[validate(length(min = 6, message = "A senha deve ter no mínimo 6 caracteres."))]
+
+    #[validate(length(min = 6, code = "password_too_short"))]
     pub password: String,
 }
 

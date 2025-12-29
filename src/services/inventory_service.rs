@@ -9,7 +9,9 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::Zero;
 use sqlx::{PgPool, Postgres, Executor};
 use uuid::Uuid;
-use chrono::NaiveDate; // Importante
+use chrono::NaiveDate;
+use crate::models::inventory::{Category, UnitOfMeasure};
+// Importante
 
 #[derive(Clone)]
 pub struct InventoryService {
@@ -95,6 +97,67 @@ impl InventoryService {
 
         tx.commit().await?;
         Ok(new_item)
+    }
+
+    pub async fn get_all_items<'e, E>(
+        &self,
+        executor: E, // O Service aceita qualquer executor (Pool, Transação ou Conexão RLS)
+        tenant_id: Uuid,
+    ) -> Result<Vec<Item>, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        self.inventory_repo.get_all_items(executor, tenant_id).await
+    }
+
+    pub async fn create_unit<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+        name: &str,
+        symbol: &str,
+    ) -> Result<UnitOfMeasure, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        // Repassa para o repositório
+        self.inventory_repo.create_unit(executor, tenant_id, name, symbol).await
+    }
+
+    pub async fn get_all_units<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+    ) -> Result<Vec<UnitOfMeasure>, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        self.inventory_repo.get_all_units(executor, tenant_id).await
+    }
+
+    pub async fn create_category<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+        name: &str,
+        description: Option<&str>,
+        parent_id: Option<Uuid>,
+    ) -> Result<Category, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        self.inventory_repo.create_category(executor, tenant_id, name, description, parent_id).await
+    }
+
+    pub async fn get_all_categories<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+    ) -> Result<Vec<Category>, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        self.inventory_repo.get_all_categories(executor, tenant_id).await
     }
 
     // --- ADD STOCK (ENTRADA) ---
@@ -248,4 +311,6 @@ impl InventoryService {
         tx.commit().await?;
         Ok(())
     }
+
+
 }

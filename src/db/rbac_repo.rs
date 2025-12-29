@@ -42,7 +42,7 @@ impl RbacRepository {
             .map_err(|e| {
                 if let sqlx::Error::Database(db_err) = &e {
                     if db_err.is_unique_violation() {
-                        return AppError::UniqueConstraintViolation("Já existe um cargo com esse nome.".into());
+                        return AppError::RoleAlreadyExist(name.to_string());
                     }
                 }
                 e.into()

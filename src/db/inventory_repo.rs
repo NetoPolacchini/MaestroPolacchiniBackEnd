@@ -2,7 +2,6 @@
 
 use sqlx::{Executor, PgPool, Postgres};
 use rust_decimal::Decimal;
-use rust_decimal::prelude::Zero;
 use uuid::Uuid;
 use crate::{
     common::error::AppError,

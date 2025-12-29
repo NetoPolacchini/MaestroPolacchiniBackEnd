@@ -2,7 +2,7 @@
 
 use sqlx::{PgPool, Postgres, Executor};
 use crate::{common::error::AppError, models::auth::User};
-use crate::models::auth::{DocumentType}; // Importe o Enum que criamos
+use crate::models::auth::{DocumentType};
 
 // O repositório de usuários, responsável por todas as interações com a tabela 'users'
 #[derive(Clone)]
@@ -90,7 +90,6 @@ impl UserRepository {
             RETURNING
                 id, email, password_hash, created_at, updated_at,
                 country_code,
-                -- CAST EXPLÍCITO AQUI:
                 document_type as "document_type: DocumentType",
                 document_number
             "#,
@@ -105,9 +104,18 @@ impl UserRepository {
             .map_err(|e| {
                 if let sqlx::Error::Database(db_err) = &e {
                     if db_err.is_unique_violation() {
-                        // Aqui pode ser Email duplicado OU Documento duplicado
-                        // Seria ideal checar a constraint name, mas vamos simplificar
-                        return AppError::UniqueConstraintViolation("Email ou CPF já cadastrado.".into());
+                        if let Some(constraint) = db_err.constraint() {
+                            return match constraint {
+                                // O nome padrão que o Postgres cria para "UNIQUE" na coluna email
+                                "users_email_key" => AppError::EmailAlreadyExists,
+
+                                // O nome do índice que você criou na migration
+                                "idx_users_global_identity" => AppError::DocumentAlreadyExists,
+
+                                // Fallback (caso adicione outras chaves únicas no futuro)
+                                _ => AppError::UniqueConstraintViolation(constraint.to_string()),
+                            }
+                        }
                     }
                 }
                 e.into()

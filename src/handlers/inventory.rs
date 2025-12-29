@@ -12,6 +12,7 @@ use crate::{common::error::{ApiError, AppError}, config::AppState, middleware::{
     auth::AuthenticatedUser, // O extrator de Utilizador
     i18n::Locale,            // O extrator de Idioma
     tenancy::TenantContext,  // O extrator de Tenant (do X-Tenant-ID)
+    rbac::{RequirePermission, PermInventoryWrite}, // Guardião e a Permissão específica
 }
 };
 // Importa os nossos extratores e erros
@@ -73,15 +74,11 @@ impl CreateItemPayload {
     fn validate_consistency(&self) -> Result<(), ValidationError> {
         // Regra: Se o estoque for maior que zero, PRECISAMOS saber onde guardar (location_id).
         if self.initial_stock > Decimal::ZERO && self.location_id.is_none() {
-            //let mut err = ValidationError::new("location_required");
-            //err.message = Some("Para definir um estoque inicial, é obrigatório informar o Local (locationId).".into());
             return Err(ValidationError::new("LocationRequiredForStock"));
         }
 
         // Regra: Se definir alerta de estoque baixo, precisa de um local.
         if self.low_stock_threshold > Decimal::ZERO && self.location_id.is_none() {
-            //let mut err = ValidationError::new("location_required");
-            //err.message = Some("Para definir alerta de estoque baixo, é obrigatório informar o Local (locationId).".into());
             return Err(ValidationError::new("LocationRequiredForThreshold"));
         }
 
@@ -97,6 +94,7 @@ pub async fn create_item(
     locale: Locale,
     user: AuthenticatedUser,
     tenant: TenantContext,
+    _guard: RequirePermission<PermInventoryWrite>,
     Json(payload): Json<CreateItemPayload>,
 ) -> Result<impl IntoResponse, ApiError> {
 
@@ -113,7 +111,9 @@ pub async fn create_item(
             AppError::ValidationError(errors).to_api_error(&locale, &app_state.i18n_store)
         })?;
 
-    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
+    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user)
+        .await
+        .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;
 
     // MUDANÇA 4: Passamos location_id como Option (sem o unwrap)
     let new_item = app_state
@@ -143,18 +143,21 @@ pub async fn create_item(
 pub async fn get_all_items(
     State(app_state): State<AppState>,
     locale: Locale,
-    user: AuthenticatedUser, // <-- Mudança: obtemos o 'user'
+    user: AuthenticatedUser,
     tenant: TenantContext,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    // 1. Adquire uma conexão segura com RLS
+    // 1. Prepara a infraestrutura (Conexão Segura)
+    // Usamos o helper refatorado (que retorna AppError)
+    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user)
+        .await
+        .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;
 
-    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
-
-    // 2. Chama o repositório com a conexão RLS
+    // 2. Chama o Service (Regra de Negócio)
+    // Note que passamos &mut *rls_conn como executor
     let items = app_state
-        .inventory_repo
-        .get_all_items(&mut *rls_conn, tenant.0) // <-- MUDANÇA: Passa a conexão RLS
+        .inventory_service // <--- AGORA SIM: Service
+        .get_all_items(&mut *rls_conn, tenant.0)
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
 
@@ -178,7 +181,7 @@ pub struct CreateUnitPayload {
 pub async fn create_unit_of_measure(
     State(app_state): State<AppState>,
     locale: Locale,
-    user: AuthenticatedUser, // <-- Mudança: obtemos o 'user'
+    user: AuthenticatedUser,
     tenant: TenantContext,
     Json(payload): Json<CreateUnitPayload>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -187,29 +190,23 @@ pub async fn create_unit_of_measure(
         .validate()
         .map_err(|e| AppError::ValidationError(e).to_api_error(&locale, &app_state.i18n_store))?;
 
-    // 1. Adquire uma conexão segura com RLS
-    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
+    // 1. Adquire Conexão RLS
+    // (Não precisa iniciar Transaction se for apenas 1 operação de banco)
+    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user)
+        .await
+        .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;
 
-    // 2. Inicia uma transação a partir da conexão RLS
-    let mut tx = rls_conn.begin().await.map_err(|e| {
-        AppError::DatabaseError(e).to_api_error(&locale, &app_state.i18n_store)
-    })?;
-
-    // 3. Chama o repositório com a transação
+    // 2. Chama o Service (passando a conexão RLS como executor)
     let unit = app_state
-        .inventory_repo
+        .inventory_service // <--- MUDANÇA: Service
         .create_unit(
-            &mut *tx, // Passa a transação
+            &mut *rls_conn, // A conexão age como executor direto
             tenant.0,
             &payload.name,
             &payload.symbol
         )
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
-
-    tx.commit().await.map_err(|e| {
-        AppError::DatabaseError(e).to_api_error(&locale, &app_state.i18n_store)
-    })?;
 
     Ok((StatusCode::CREATED, Json(unit)))
 }
@@ -220,15 +217,17 @@ pub async fn create_unit_of_measure(
 pub async fn get_all_units(
     State(app_state): State<AppState>,
     locale: Locale,
-    user: AuthenticatedUser, // <-- Mudança: obtemos o 'user'
+    user: AuthenticatedUser,
     tenant: TenantContext,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
+    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user)
+        .await
+        .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;
 
     let units = app_state
-        .inventory_repo
-        .get_all_units(&mut *rls_conn, tenant.0) // <-- MUDANÇA: Passa a conexão RLS
+        .inventory_service
+        .get_all_units(&mut *rls_conn, tenant.0)
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
 
@@ -254,7 +253,7 @@ pub struct CreateCategoryPayload {
 pub async fn create_category(
     State(app_state): State<AppState>,
     locale: Locale,
-    user: AuthenticatedUser, // <-- Mudança: obtemos o 'user'
+    user: AuthenticatedUser,
     tenant: TenantContext,
     Json(payload): Json<CreateCategoryPayload>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -263,16 +262,16 @@ pub async fn create_category(
         .validate()
         .map_err(|e| AppError::ValidationError(e).to_api_error(&locale, &app_state.i18n_store))?;
 
-    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
+    // 1. Conexão RLS
+    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user)
+        .await
+        .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;
 
-    let mut tx = rls_conn.begin().await.map_err(|e| {
-        AppError::DatabaseError(e).to_api_error(&locale, &app_state.i18n_store)
-    })?;
-
+    // 2. Chamada ao Service (Sem begin/commit manual)
     let category = app_state
-        .inventory_repo
+        .inventory_service // <--- MUDANÇA: Service
         .create_category(
-            &mut *tx,
+            &mut *rls_conn, // Executor direto
             tenant.0,
             &payload.name,
             payload.description.as_deref(),
@@ -280,10 +279,6 @@ pub async fn create_category(
         )
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
-
-    tx.commit().await.map_err(|e| {
-        AppError::DatabaseError(e).to_api_error(&locale, &app_state.i18n_store)
-    })?;
 
     Ok((StatusCode::CREATED, Json(category)))
 }
@@ -294,15 +289,17 @@ pub async fn create_category(
 pub async fn get_all_categories(
     State(app_state): State<AppState>,
     locale: Locale,
-    user: AuthenticatedUser, // <-- Mudança: obtemos o 'user'
+    user: AuthenticatedUser,
     tenant: TenantContext,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
+    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user)
+        .await
+        .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;
 
     let categories = app_state
-        .inventory_repo
-        .get_all_categories(&mut *rls_conn, tenant.0) // <-- MUDANÇA: Passa a conexão RLS
+        .inventory_service // <--- MUDANÇA: Service
+        .get_all_categories(&mut *rls_conn, tenant.0)
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
 
@@ -339,7 +336,9 @@ pub async fn sell_item(
     payload.validate()
         .map_err(|e| AppError::ValidationError(e).to_api_error(&locale, &app_state.i18n_store))?;
 
-    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
+    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user)
+        .await
+        .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;
 
     // Chama o serviço de Venda Direta (sem reserva prévia)
     app_state.inventory_service
@@ -397,7 +396,9 @@ pub async fn add_stock(
     payload.validate()
         .map_err(|e| AppError::ValidationError(e).to_api_error(&locale, &app_state.i18n_store))?;
 
-    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user, &locale).await?;
+    let mut rls_conn = get_rls_connection(&app_state, &tenant, &user)
+        .await
+        .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;
 
     // Chama o serviço poderoso que criamos
     let updated_level = app_state.inventory_service

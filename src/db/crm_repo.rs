@@ -49,7 +49,6 @@ impl CrmRepository {
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING
             id, tenant_id, name, key_name,
-            -- AQUI ESTÁ A CORREÇÃO:
             field_type as "field_type: CrmFieldType",
             options, is_required, created_at
         "#,
@@ -66,7 +65,7 @@ impl CrmRepository {
                 // Tratamento de erro de chave duplicada
                 if let sqlx::Error::Database(db_err) = &e {
                     if db_err.is_unique_violation() {
-                        return AppError::UniqueConstraintViolation(format!("A chave '{}' já existe.", key_name));
+                        return AppError::CrmFieldKeyAlreadyExists(key_name.to_string());
                     }
                 }
                 e.into()
@@ -171,7 +170,7 @@ impl CrmRepository {
             .map_err(|e| {
                 if let sqlx::Error::Database(db_err) = &e {
                     if db_err.is_unique_violation() {
-                        return AppError::UniqueConstraintViolation(format!("Documento '{}' já cadastrado.", document_number.unwrap_or("?")));
+                        return AppError::CustomerDocumentAlreadyExists(document_number.unwrap().to_string());
                     }
                 }
                 e.into()
@@ -272,7 +271,7 @@ impl CrmRepository {
             SET user_id = $1, updated_at = NOW()
             WHERE
                 country_code = $2
-                AND document_type = $3::document_type -- Cast importante!
+                AND document_type = $3::document_type
                 AND document_number = $4
                 AND user_id IS NULL -- Só pega se não tiver dono ainda
             "#,

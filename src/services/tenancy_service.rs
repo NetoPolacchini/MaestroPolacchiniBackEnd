@@ -77,7 +77,7 @@ impl TenantService {
                 &mut *tx,
                 new_tenant.id,
                 owner_id,
-                owner_role.id // <--- O Pulo do Gato
+                owner_role.id 
             )
             .await?;
 
