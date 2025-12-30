@@ -85,6 +85,21 @@ async fn main() {
             tenant_guard,
         ));
 
+    let operations_routes = Router::new()
+        // Configuração
+        .route("/pipelines", post(handlers::operations::create_pipeline))
+        .route("/pipelines/{id}/stages", post(handlers::operations::add_stage))
+
+        // Operação
+        .route("/orders", post(handlers::operations::create_order))
+        .route("/orders/{id}/items", post(handlers::operations::add_order_item))
+        .route("/orders/{id}/transition", post(handlers::operations::transition_order))
+
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            tenant_guard,
+        ));
+
     let tenancy_routes = Router::new()
         .route("/"
                ,post(handlers::tenancy::create_tenant)
