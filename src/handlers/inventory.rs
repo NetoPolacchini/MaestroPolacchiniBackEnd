@@ -5,7 +5,6 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
-use sqlx::Acquire;
 
 // Importa os nossos extratores e erros
 use crate::{common::error::{ApiError, AppError}, config::AppState, middleware::{

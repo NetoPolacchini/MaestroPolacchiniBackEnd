@@ -1,11 +1,10 @@
 // src/handlers/crm.rs
 
 use axum::{
-    extract::{State, Query},
+    extract::{State},
     http::StatusCode,
     response::IntoResponse,
     Json,
-    Extension,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -16,7 +15,7 @@ use crate::{
     common::error::{ApiError, AppError},
     config::AppState,
     middleware::{tenancy::TenantContext, i18n::Locale},
-    models::crm::{CrmFieldDefinition, CrmFieldType, Customer},
+    models::crm::{ CrmFieldType},
 };
 use crate::models::auth::DocumentType;
 

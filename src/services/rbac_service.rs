@@ -4,7 +4,7 @@ use sqlx::{PgPool, Acquire}; // Acquire é necessário para iniciar transação
 use uuid::Uuid;
 use crate::common::error::AppError;
 use crate::db::RbacRepository;
-use crate::models::rbac::{Role, RoleResponse};
+use crate::models::rbac::{RoleResponse};
 
 #[derive(Clone)]
 pub struct RbacService {

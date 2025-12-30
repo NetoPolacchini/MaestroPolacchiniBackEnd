@@ -2,7 +2,6 @@
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
-use uuid::Uuid;
 use validator::Validate;
 
 // Importa os nossos extratores e erros
@@ -14,7 +13,6 @@ use crate::{
         i18n::Locale,           // O extrator de Idioma
         tenancy::TenantContext
     },
-    models::tenancy::Tenant,
 };
 
 // ---
@@ -157,7 +155,7 @@ pub async fn list_locations(
     // Vou assumir que você tem ou vai criar: tenant_repo.list_locations(tenant_id)
 
     let locations = app_state.tenant_service
-        .list_locations(tenant.0) // Você precisará criar esse método simples no Service
+        .list_locations(tenant.0)
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
 

@@ -6,7 +6,6 @@ use crate::{
     models::inventory::{Item, InventoryLevel, StockMovementReason},
 };
 use rust_decimal::Decimal;
-use rust_decimal::prelude::Zero;
 use sqlx::{PgPool, Postgres, Executor};
 use uuid::Uuid;
 use chrono::NaiveDate;

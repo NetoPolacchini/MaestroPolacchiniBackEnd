@@ -1,7 +1,6 @@
-use crate::common::error::{ApiError, AppError};
+use crate::common::error::{AppError};
 use crate::config::AppState;
 use crate::middleware::auth::AuthenticatedUser;
-use crate::middleware::i18n::Locale;
 use crate::middleware::tenancy::TenantContext;
 
 // ---

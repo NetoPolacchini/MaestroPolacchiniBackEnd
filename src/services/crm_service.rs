@@ -1,7 +1,7 @@
 // src/services/crm_service.rs
 
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, Executor, Acquire};
+use sqlx::{ Postgres, Executor, Acquire};
 use uuid::Uuid;
 use chrono::NaiveDate;
 
