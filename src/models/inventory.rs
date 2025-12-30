@@ -1,21 +1,76 @@
 // src/models/inventory.rs
 
-use serde::{Serialize, Deserialize};
-use chrono::{DateTime, Utc, NaiveDate};
-use rust_decimal::Decimal;
-use sqlx::FromRow;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use sqlx::FromRow;
+use chrono::{DateTime, NaiveDate, Utc};
+use rust_decimal::Decimal; // Certifique-se de ter essa lib no Cargo.toml
 
-// --- 1. Unidades de Medida (ATUALIZADO) ---
+// --- Enums (Mapeamento do Postgres) ---
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "item_kind", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ItemKind {
+    Product,  // Físico
+    Service,  // Intangível
+    Resource, // Alocável (Mesa, Sala)
+    Bundle,   // Virtual/Combo
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "composition_type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CompositionType {
+    Component,  // Faz parte (baixa estoque)
+    Accessory,  // Acompanha (não essencial)
+    Substitute, // Opção de troca
+}
+
+// --- Structs Principais ---
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
-pub struct UnitOfMeasure {
+pub struct Item {
     pub id: Uuid,
     pub tenant_id: Uuid,
+
+    pub sku: String,
     pub name: String,
-    pub symbol: String,
+    pub description: Option<String>,
+
+    // [NOVO] Tipo e Configurações
+    pub kind: ItemKind,
+    pub settings: Option<serde_json::Value>, // JSON Flexível
+
+    pub unit_id: Uuid,
+    pub category_id: Option<Uuid>,
+
+    // Mantemos o preço base (venda) e custo
+    pub cost_price: Option<Decimal>,
+    pub sale_price: Decimal,
+
+    // Estoque atual (apenas informativo, calculado via transactions/inventory_levels)
+    pub current_stock: Decimal,
+    pub min_stock: Option<Decimal>,
+
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+// --- Struct de Composição (A Ficha Técnica) ---
+// Usada para retornar os ingredientes de um produto na API
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct CompositionEntry {
+    pub id: Uuid, // ID da relação
+
+    // Dados do Item Filho (Join)
+    pub child_item_id: Uuid,
+    pub child_sku: String,
+    pub child_name: String,
+    pub child_unit: String, // Símbolo da unidade (Ex: "kg", "un")
+
+    pub quantity: Decimal,
+    pub comp_type: CompositionType,
 }
 
 // --- 2. Categorias (ATUALIZADO) ---
@@ -31,26 +86,6 @@ pub struct Category {
     pub updated_at: DateTime<Utc>,
 }
 
-// --- 3. Itens / Produtos (ATUALIZADO) ---
-// Esta struct é agora apenas o "catálogo" de produtos.
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-#[serde(rename_all = "camelCase")]
-pub struct Item {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub category_id: Uuid,
-    pub base_unit_id: Uuid,
-    pub sku: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub default_price: Option<Decimal>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-// --- 4. Nível de Estoque (NOVO) ---
-// Esta é a nova struct "Saldo". Ela liga um Item a um Local.
-// Ela representa a tabela 'inventory_levels'.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct InventoryLevel {
@@ -71,12 +106,6 @@ pub struct InventoryLevel {
     pub low_stock_threshold: Decimal,
     pub updated_at: DateTime<Utc>,
 }
-
-
-// --- 5. Movimentações de Estoque (ATUALIZADO) ---
-
-// MUDANÇA: Adicionado TRANSFER_OUT e TRANSFER_IN
-// src/models/inventory.rs
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
 #[sqlx(type_name = "stock_movement_reason", rename_all = "SCREAMING_SNAKE_CASE")] // Banco
@@ -108,6 +137,18 @@ pub struct StockMovement {
     pub unit_price: Option<Decimal>,
     pub notes: Option<String>,
     pub created_at: DateTime<Utc>,
+}
+
+// --- 1. Unidades de Medida (ATUALIZADO) ---
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct UnitOfMeasure {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub symbol: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

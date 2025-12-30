@@ -61,6 +61,10 @@ async fn main() {
                ,post(handlers::inventory::create_item)
                .get(handlers::inventory::get_all_items)
         )
+        .route("/items/{id}/composition"
+               ,post(handlers::inventory::add_composition_item)
+               .get(handlers::inventory::get_item_composition)
+        )
         .route("/units"
                ,post(handlers::inventory::create_unit_of_measure)
                .get(handlers::inventory::get_all_units)
