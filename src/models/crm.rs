@@ -1,19 +1,20 @@
 // src/models/crm.rs
 
-use chrono::{DateTime, Utc, NaiveDate};
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 use uuid::Uuid;
-use serde_json::Value; // <--- A chave para o JSONB
-use crate::models::auth::DocumentType; // Ajuste conforme seu caminho de arquivo
+use sqlx::FromRow;
+// REMOVIDO: use sqlx::types::Json; -> Não precisamos mais deste wrapper para Value puro
+use chrono::{DateTime, Utc, NaiveDate};
 
-// --- ENUMS ---
+// [CORREÇÃO 1] Importamos o DocumentType do módulo auth para evitar duplicação
+use crate::models::auth::DocumentType;
 
-// Mapeia o CREATE TYPE crm_field_type do banco
+// --- Enums ---
+
+// FieldType é específico do CRM, mantemos aqui.
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
-#[sqlx(type_name = "crm_field_type", rename_all = "UPPERCASE")]
-#[serde(rename_all = "UPPERCASE")]
-pub enum CrmFieldType {
+#[sqlx(type_name = "crm_field_type", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum FieldType {
     Text,
     Number,
     Date,
@@ -22,60 +23,69 @@ pub enum CrmFieldType {
     Multiselect,
 }
 
-// --- DEFINIÇÕES (O Molde) ---
+// REMOVIDO: DocumentType (Agora usamos o de auth)
+
+// --- Structs de Configuração (O Molde) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
-pub struct CrmFieldDefinition {
+pub struct EntityType {
     pub id: Uuid,
     pub tenant_id: Uuid,
-
-    pub name: String,      // Ex: "Peso"
-    pub key_name: String,  // Ex: "weight"
-
-    pub field_type: CrmFieldType,
-
-    // Opções para Selects (Ex: ["A", "B"]).
-    // Usamos 'Value' porque pode ser um array de strings ou objetos.
-    pub options: Option<Value>,
-
-    pub is_required: bool,
+    pub name: String,
+    pub slug: String,
     pub created_at: DateTime<Utc>,
 }
 
-// --- CLIENTE (O Dado) ---
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldDefinition {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub entity_type_id: Option<Uuid>,
+    pub name: String,
+    pub key_name: String,
+    pub field_type: FieldType,
+
+    // [CORREÇÃO 2] JSONB mapeia direto para Option<serde_json::Value>
+    pub options: Option<serde_json::Value>,
+
+    pub is_required: bool,
+}
+
+// --- Customer (O Dado) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct Customer {
     pub id: Uuid,
     pub tenant_id: Uuid,
-
     pub user_id: Option<Uuid>,
 
     pub full_name: String,
-    pub birth_date: Option<NaiveDate>,
-
     pub email: Option<String>,
+
     pub phone: Option<String>,
     pub mobile: Option<String>,
 
-    // Endereço flexível.
-    // O Frontend manda um JSON, o Rust guarda como JSONB.
-    pub address: Option<Value>,
+    pub country_code: Option<String>,
 
-    // Tags simples (Array de Strings)
-    // No Postgres é TEXT[], no Rust é Vec<String>
+    // [CORREÇÃO 1] Usa o Enum unificado
+    pub document_type: Option<DocumentType>,
+
+    pub document_number: Option<String>,
+
+    pub birth_date: Option<NaiveDate>,
+
+    // [CORREÇÃO 2] JSONB -> serde_json::Value direto
+    pub address: Option<serde_json::Value>,
     pub tags: Option<Vec<String>>,
 
-    // CAMPOS PERSONALIZADOS
-    // Aqui vai o { "weight": 80, "team": "Flamengo" }
-    pub custom_data: Value,
+    pub entity_types: Option<Vec<Uuid>>,
 
-    // [ATUALIZADO] Identidade Global
-    pub country_code: Option<String>,
-    pub document_type: Option<DocumentType>,
-    pub document_number: Option<String>, // O antigo era só document_number
+    // [CORREÇÃO 2] JSONB -> serde_json::Value (Option pois o SQL infere que pode ser nulo)
+    // Usamos 'custom_data' puro, sem Json<...>
+    pub custom_data: Option<serde_json::Value>,
 
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

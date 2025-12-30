@@ -17,8 +17,14 @@ pub enum AppError {
     #[error("Erro de validação")]
     ValidationError(#[from] validator::ValidationErrors),
 
+    #[error("Erros de validação nos campos personalizados")]
+    CustomDataValidationError(HashMap<String, String>),
+
     #[error("E-mail já existe")]
     EmailAlreadyExists,
+
+    #[error("Custom data must be a JSON object")]
+    CustomDataJson,
 
     #[error("Credenciais inválidas")]
     InvalidCredentials,
@@ -83,6 +89,9 @@ pub enum AppError {
 
     #[error("Já existe um campo com esta chave")]
     CrmFieldKeyAlreadyExists(String), // Recebe a chave duplicada
+
+    #[error("Já existe um tipo com este nome")]
+    CrmEntityTypeAlreadyExists(String),
 
     #[error("Cliente com documento duplicado")]
     CustomerDocumentAlreadyExists(String), // Recebe o número do doc
@@ -201,6 +210,7 @@ impl AppError {
             AppError::DocumentAlreadyExists => (StatusCode::CONFLICT, get_template("DocumentAlreadyExists"), None),
             AppError::ForbiddenAccess => (StatusCode::FORBIDDEN, get_template("ForbiddenAccess"), None),
             AppError::MemberAlreadyExists => (StatusCode::CONFLICT, get_template("MemberAlreadyExists"), None),
+            AppError::CustomDataJson => (StatusCode::CONFLICT, get_template("CustomDataJson"), None),
 
             // Erros Dinâmicos (com replace)
             AppError::UnitNameAlreadyExists(name) => {
@@ -241,6 +251,10 @@ impl AppError {
             }
             AppError::CrmFieldKeyAlreadyExists(key) => {
                 let t = get_template("CrmFieldKeyAlreadyExists");
+                (StatusCode::CONFLICT, t.replace("{value}", &key), None)
+            }
+            AppError::CrmEntityTypeAlreadyExists(key) => {
+                let t = get_template("CrmEntityTypeAlreadyExists");
                 (StatusCode::CONFLICT, t.replace("{value}", &key), None)
             }
             AppError::CustomerDocumentAlreadyExists(doc) => {

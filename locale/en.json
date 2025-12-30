@@ -22,8 +22,14 @@
   "required": "This field is required.",
   "range": "Value is out of allowed range.",
   "CrmFieldKeyAlreadyExists": "The key {value} is already in use",
+  "CrmEntityTypeAlreadyExists": "The Entity Type {value} already exist.",
   "CustomerDocumentAlreadyExists": "Client with {} document duplicated",
   "email": "Invalid email format.",
   "length": "Invalid length.",
-  "password_too_short": "Password is too short. Please use at least 6 characters."
+  "password_too_short": "Password is too short. Please use at least 6 characters.",
+  "CustomDataJson": "Custom data must be a JSON object",
+  "invalid_number": "The value must be numeric.",
+  "invalid_date_format": "Invalid Date (use AAAA-MM-DD).",
+  "invalid_boolean": "Value must be true or false",
+  "invalid_list": "Select at least one of the valid options"
 }

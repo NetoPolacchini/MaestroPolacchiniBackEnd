@@ -5,10 +5,10 @@ use uuid::Uuid;
 use serde_json::Value;
 use chrono::NaiveDate;
 
-
 use crate::{
     common::error::AppError,
-    models::crm::{CrmFieldDefinition, CrmFieldType, Customer},
+    // Note que atualizei os imports para bater com o models/crm.rs novo
+    models::crm::{FieldDefinition, FieldType, Customer, EntityType},
 };
 use crate::models::auth::{DocumentType, UserCompany};
 
@@ -23,7 +23,71 @@ impl CrmRepository {
     }
 
     // =========================================================================
-    //  DEFINIÇÕES DE CAMPOS (O Molde)
+    //  1. TIPOS DE ENTIDADE (NOVO)
+    //  Ex: "Paciente", "Aluno", "Veículo"
+    // =========================================================================
+
+    pub async fn create_entity_type<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+        name: &str,
+        slug: &str,
+    ) -> Result<EntityType, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let entity_type = sqlx::query_as!(
+            EntityType,
+            r#"
+            INSERT INTO crm_entity_types (tenant_id, name, slug)
+            VALUES ($1, $2, $3)
+            RETURNING id, tenant_id, name, slug, created_at
+            "#,
+            tenant_id,
+            name,
+            slug
+        )
+            .fetch_one(executor)
+            .await
+            .map_err(|e| {
+                if let sqlx::Error::Database(db_err) = &e {
+                    if db_err.is_unique_violation() {
+                        return AppError::CrmEntityTypeAlreadyExists(slug.to_string());
+                    }
+                }
+                e.into()
+            })?;
+
+        Ok(entity_type)
+    }
+
+    pub async fn list_entity_types<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+    ) -> Result<Vec<EntityType>, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let types = sqlx::query_as!(
+            EntityType,
+            r#"
+            SELECT id, tenant_id, name, slug, created_at
+            FROM crm_entity_types
+            WHERE tenant_id = $1
+            ORDER BY name ASC
+            "#,
+            tenant_id
+        )
+            .fetch_all(executor)
+            .await?;
+
+        Ok(types)
+    }
+
+    // =========================================================================
+    //  2. DEFINIÇÕES DE CAMPOS (O Molde)
     // =========================================================================
 
     /// Cria uma nova definição de campo (Ex: "Peso", "Alergias")
@@ -31,38 +95,39 @@ impl CrmRepository {
         &self,
         executor: E,
         tenant_id: Uuid,
+        entity_type_id: Option<Uuid>, // [NOVO] Vincula a um tipo específico
         name: &str,
         key_name: &str,
-        field_type: CrmFieldType,
-        options: Option<&Value>, // JSON para opções de Select
+        field_type: FieldType,
+        options: Option<&Value>,
         is_required: bool,
-    ) -> Result<CrmFieldDefinition, AppError>
+    ) -> Result<FieldDefinition, AppError>
     where
         E: Executor<'e, Database = Postgres>,
     {
         let definition = sqlx::query_as!(
-        CrmFieldDefinition,
-        r#"
-        INSERT INTO crm_field_definitions (
-            tenant_id, name, key_name, field_type, options, is_required
+            FieldDefinition,
+            r#"
+            INSERT INTO crm_field_definitions (
+                tenant_id, entity_type_id, name, key_name, field_type, options, is_required
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING
+                id, tenant_id, entity_type_id, name, key_name,
+                field_type as "field_type: FieldType",
+                options, is_required
+            "#,
+            tenant_id,
+            entity_type_id,
+            name,
+            key_name,
+            field_type as FieldType,
+            options,
+            is_required
         )
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING
-            id, tenant_id, name, key_name,
-            field_type as "field_type: CrmFieldType",
-            options, is_required, created_at
-        "#,
-        tenant_id,
-        name,
-        key_name,
-        field_type as CrmFieldType,
-        options,
-        is_required
-    )
             .fetch_one(executor)
             .await
             .map_err(|e| {
-                // Tratamento de erro de chave duplicada
                 if let sqlx::Error::Database(db_err) = &e {
                     if db_err.is_unique_violation() {
                         return AppError::CrmFieldKeyAlreadyExists(key_name.to_string());
@@ -74,28 +139,27 @@ impl CrmRepository {
         Ok(definition)
     }
 
-    /// Lista todas as definições para montar o formulário no Frontend
-    pub async fn list_field_definitions<'e, E>(
+    /// Lista TODAS as definições do tenant (Globais + Específicas)
+    pub async fn list_all_field_definitions<'e, E>(
         &self,
         executor: E,
         tenant_id: Uuid,
-    ) -> Result<Vec<CrmFieldDefinition>, AppError>
+    ) -> Result<Vec<FieldDefinition>, AppError>
     where
         E: Executor<'e, Database = Postgres>,
     {
         let fields = sqlx::query_as!(
-        CrmFieldDefinition,
-        r#"
-        SELECT
-            id, tenant_id, name, key_name,
-            -- AQUI TAMBÉM:
-            field_type as "field_type: CrmFieldType",
-            options, is_required, created_at
-        FROM crm_field_definitions
-        WHERE tenant_id = $1
-        ORDER BY created_at ASC
-        "#,
-        tenant_id
+            FieldDefinition,
+            r#"
+            SELECT
+                id, tenant_id, entity_type_id, name, key_name,
+                field_type as "field_type: FieldType",
+                options, is_required
+            FROM crm_field_definitions
+            WHERE tenant_id = $1
+            ORDER BY created_at ASC
+            "#,
+            tenant_id
         )
             .fetch_all(executor)
             .await?;
@@ -104,35 +168,36 @@ impl CrmRepository {
     }
 
     // =========================================================================
-    //  CLIENTES (O Dado)
+    //  3. CLIENTES (O Dado)
     // =========================================================================
 
-    /// Cria um cliente com dados flexíveis
-    /// Cria um cliente com dados flexíveis
     pub async fn create_customer<'e, E>(
         &self,
         executor: E,
         tenant_id: Uuid,
         full_name: &str,
-        // [ATUALIZADO] Novos argumentos para identidade global
         country_code: Option<&str>,
         document_type: Option<DocumentType>,
         document_number: Option<&str>,
-        // ---------------------------------------------------
         birth_date: Option<NaiveDate>,
         email: Option<&str>,
         phone: Option<&str>,
         mobile: Option<&str>,
         address: Option<&Value>,
         tags: Option<&[String]>,
+
+        // [NOVO] Array de tipos (ex: [ID_PACIENTE, ID_ALUNO])
+        entity_types: Option<&[Uuid]>,
         custom_data: &Value,
     ) -> Result<Customer, AppError>
     where
         E: Executor<'e, Database = Postgres>,
     {
-        // Define padrões caso venha nulo (igual fizemos no UserRepo)
         let final_country = country_code.unwrap_or("BR");
         let final_doc_type = document_type.unwrap_or(DocumentType::TaxId);
+
+        // Garante vetor vazio se vier None para o SQL não reclamar
+        let final_entity_types = entity_types.unwrap_or(&[]);
 
         let customer = sqlx::query_as!(
             Customer,
@@ -140,14 +205,15 @@ impl CrmRepository {
             INSERT INTO customers (
                 tenant_id, full_name,
                 country_code, document_type, document_number,
-                birth_date, email, phone, mobile, address, tags, custom_data
+                birth_date, email, phone, mobile, address, tags,
+                entity_types, custom_data
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING
                 id, tenant_id, user_id, full_name, birth_date,
-                email, phone, mobile, address, tags, custom_data,
+                email, phone, mobile, address, tags,
+                entity_types, custom_data,
                 country_code,
-                -- CAST EXPLÍCITO OBRIGATÓRIO:
                 document_type as "document_type: DocumentType",
                 document_number,
                 created_at, updated_at
@@ -163,14 +229,15 @@ impl CrmRepository {
             mobile,                      // $9
             address,                     // $10
             tags as Option<&[String]>,   // $11
-            custom_data                  // $12
+            final_entity_types,          // $12 [NOVO]
+            custom_data                  // $13
         )
             .fetch_one(executor)
             .await
             .map_err(|e| {
                 if let sqlx::Error::Database(db_err) = &e {
                     if db_err.is_unique_violation() {
-                        return AppError::CustomerDocumentAlreadyExists(document_number.unwrap().to_string());
+                        return AppError::CustomerDocumentAlreadyExists(document_number.unwrap_or("?").to_string());
                     }
                 }
                 e.into()
@@ -179,7 +246,6 @@ impl CrmRepository {
         Ok(customer)
     }
 
-    /// Busca simples de todos os clientes
     pub async fn list_customers<'e, E>(
         &self,
         executor: E,
@@ -193,13 +259,15 @@ impl CrmRepository {
             r#"
             SELECT
                 id, tenant_id, user_id, full_name, birth_date,
-                email, phone, mobile, address, tags, custom_data,
+                email, phone, mobile, address, tags,
+                entity_types, custom_data,
                 country_code,
                 document_type as "document_type: DocumentType",
                 document_number,
                 created_at, updated_at
             FROM customers
             WHERE tenant_id = $1
+            ORDER BY full_name ASC
             "#,
             tenant_id
         )
@@ -209,9 +277,6 @@ impl CrmRepository {
         Ok(customers)
     }
 
-    /// Exemplo de Poder: Busca por CPF OU por campo dentro do JSON
-    /// Ex: Buscar quem tem "weight" > 80 ou quem tem a tag "VIP"
-    /// (Para simplificar, vamos fazer busca por nome ou documento por enquanto)
     pub async fn search_customers<'e, E>(
         &self,
         executor: E,
@@ -223,13 +288,13 @@ impl CrmRepository {
     {
         let search_term = format!("%{}%", query);
 
-        // [CORREÇÃO] Removemos SELECT * e colocamos os campos explícitos com o CAST
         let customers = sqlx::query_as!(
             Customer,
             r#"
             SELECT
                 id, tenant_id, user_id, full_name, birth_date,
-                email, phone, mobile, address, tags, custom_data,
+                email, phone, mobile, address, tags,
+                entity_types, custom_data,
                 country_code,
                 document_type as "document_type: DocumentType",
                 document_number,
@@ -253,7 +318,9 @@ impl CrmRepository {
         Ok(customers)
     }
 
-    /// O LINK MÁGICO: Vincula clientes órfãos ao usuário recém-criado
+    // O método link_user_to_existing_customers e find_companies_by_user
+    // permanecem iguais, pois não dependem dos campos novos.
+
     pub async fn link_user_to_existing_customers<'e, E>(
         &self,
         executor: E,
@@ -261,7 +328,7 @@ impl CrmRepository {
         country_code: &str,
         document_type: DocumentType,
         document_number: &str,
-    ) -> Result<u64, AppError> // Retorna quantos registros foram atualizados
+    ) -> Result<u64, AppError>
     where
         E: Executor<'e, Database = Postgres>,
     {
@@ -273,7 +340,7 @@ impl CrmRepository {
                 country_code = $2
                 AND document_type = $3::document_type
                 AND document_number = $4
-                AND user_id IS NULL -- Só pega se não tiver dono ainda
+                AND user_id IS NULL
             "#,
             user_id,
             country_code,
@@ -286,7 +353,6 @@ impl CrmRepository {
         Ok(result.rows_affected())
     }
 
-    /// Encontra as companies que o usuário possui um registro
     pub async fn find_companies_by_user<'e, E>(
         &self,
         executor: E,
@@ -295,8 +361,6 @@ impl CrmRepository {
     where
         E: Executor<'e, Database = Postgres>,
     {
-        // Fazemos um JOIN para pegar o nome da loja (tenants)
-        // Baseado no vínculo que existe na tabela customers
         let companies = sqlx::query_as!(
             UserCompany,
             r#"
@@ -313,5 +377,4 @@ impl CrmRepository {
 
         Ok(companies)
     }
-
 }

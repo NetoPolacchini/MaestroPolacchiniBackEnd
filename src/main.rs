@@ -114,6 +114,10 @@ async fn main() {
                ,post(handlers::crm::create_customer)
                .get(handlers::crm::list_customers)
         )
+        .route("/types"
+               ,post(handlers::crm::create_entity_type)
+               .get(handlers::crm::list_entity_types)
+        )
         // Aplica o middleware de Auth + Tenancy em tudo
         .layer(axum_middleware::from_fn_with_state(
             app_state.clone(),

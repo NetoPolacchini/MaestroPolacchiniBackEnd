@@ -22,8 +22,14 @@
   "required": "Este campo é obrigatório.",
   "range": "O valor está fora do intervalo permitido.",
   "CrmFieldKeyAlreadyExists": "A chave {value} já está sendo utilizada",
+  "CrmEntityTypeAlreadyExists": "A entidade tipo {value} já exist.",
   "CustomerDocumentAlreadyExists": "Cliente com documento {} duplicado",
   "email": "O formato de e-mail é inválido.",
   "length": "Tamanho incorreto.",
-  "password_too_short": "A senha é muito curta. Use pelo menos 6 caracteres."
+  "password_too_short": "A senha é muito curta. Use pelo menos 6 caracteres.",
+  "CustomDataJson": "Campo deve vir formatado como um objeto Json",
+  "invalid_number": "O valor deve ser numérico.",
+  "invalid_date_format": "Data inválida (use AAAA-MM-DD).",
+  "invalid_boolean": "Valor deve ser verdadeiro ou falso.",
+  "invalid_list": "Selecione uma ou mais opções válidas."
 }
