@@ -3,6 +3,7 @@ pub mod inventory_repo;
 pub mod tenancy_repo;
 pub mod crm_repo;
 pub mod rbac_repo;
+mod operations_repo;
 
 pub use user_repo::UserRepository;
 pub use inventory_repo::InventoryRepository;
