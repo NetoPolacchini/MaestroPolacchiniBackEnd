@@ -180,6 +180,18 @@ impl InventoryService {
         self.inventory_repo.get_all_items(executor, tenant_id).await
     }
 
+    pub async fn get_item<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+        item_id: Uuid,
+    ) -> Result<Option<Item>, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        self.inventory_repo.get_item(executor, tenant_id, item_id).await
+    }
+
     pub async fn get_all_units<'e, E>(
         &self,
         executor: E,

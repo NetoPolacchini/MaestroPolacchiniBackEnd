@@ -31,5 +31,6 @@
   "invalid_number": "O valor deve ser numérico.",
   "invalid_date_format": "Data inválida (use AAAA-MM-DD).",
   "invalid_boolean": "Valor deve ser verdadeiro ou falso.",
-  "invalid_list": "Selecione uma ou mais opções válidas."
+  "invalid_list": "Selecione uma ou mais opções válidas.",
+  "ResourceNotFound": "Recurso {value} não encontrado."
 }

@@ -159,6 +159,7 @@ async fn main() {
         .nest("/api/tenants", rbac_routes.layer(
             axum_middleware::from_fn_with_state(app_state.clone(), tenant_guard)
         ))
+        .nest("/api/operations", operations_routes)
         .with_state(app_state);
 
     // Inicia o servidor

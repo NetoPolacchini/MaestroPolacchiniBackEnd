@@ -89,6 +89,7 @@ pub async fn tenant_guard(
 // ---
 // Extrator (Permanece igual)
 // ---
+#[derive(Debug, Clone)]
 pub struct AuthenticatedUser(pub User);
 
 impl<S> FromRequestParts<S> for AuthenticatedUser
@@ -101,15 +102,24 @@ where
         parts: &mut Parts,
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        parts
+        let user_model = parts
             .extensions
             .get::<User>()
             .cloned()
-            .map(AuthenticatedUser)
             .ok_or(ApiError{
                 status: StatusCode::UNAUTHORIZED,
                 error: "Authentication token required or invalid.".to_string(),
                 details: None
-            })
+            })?;
+
+        // 2. Cria o wrapper que o seu código espera
+        let auth_user = AuthenticatedUser(user_model);
+
+        // 3. [CORREÇÃO 2] Injeta o wrapper de volta nas extensions!
+        // Agora, quando o RBAC rodar (que vem depois deste extrator),
+        // ele vai encontrar o 'AuthenticatedUser' que estava procurando.
+        parts.extensions.insert(auth_user.clone());
+
+        Ok(auth_user)
     }
 }

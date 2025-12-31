@@ -19,7 +19,7 @@ impl OperationsRepository {
     }
 
     // =========================================================================
-    //  PIPELINES & STAGES (Configuração)
+    //  PIPELINES & STAGES
     // =========================================================================
 
     pub async fn create_pipeline<'e, E>(
@@ -57,7 +57,7 @@ impl OperationsRepository {
         name: &str,
         category: PipelineCategory,
         position: i32,
-        stock_action: Option<&str>, // 'NONE', 'RESERVE', 'DEDUCT'
+        stock_action: Option<&str>,
     ) -> Result<PipelineStage, AppError>
     where
         E: Executor<'e, Database = Postgres>,
@@ -89,37 +89,9 @@ impl OperationsRepository {
         Ok(stage)
     }
 
-    // Busca a etapa inicial de um pipeline (para criar pedidos novos)
-    pub async fn get_default_stage<'e, E>(
-        &self,
-        executor: E,
-        tenant_id: Uuid,
-        pipeline_id: Uuid,
-    ) -> Result<PipelineStage, AppError>
-    where
-        E: Executor<'e, Database = Postgres>,
-    {
-        let stage = sqlx::query_as!(
-            PipelineStage,
-            r#"
-            SELECT
-                id, tenant_id, pipeline_id, name,
-                category as "category: PipelineCategory",
-                position, color, stock_action, generates_receivable, is_locked
-            FROM pipeline_stages
-            WHERE tenant_id = $1 AND pipeline_id = $2
-            ORDER BY position ASC
-            LIMIT 1
-            "#,
-            tenant_id,
-            pipeline_id
-        )
-            .fetch_one(executor)
-            .await?;
-
-        Ok(stage)
-    }
-
+    // [OTIMIZAÇÃO] Não precisamos mais do get_default_stage separado
+    // se usarmos uma subquery na criação do pedido.
+    // Mas mantemos aqui para consultas de frontend se necessário.
     pub async fn get_stage_by_id<'e, E>(
         &self,
         executor: E,
@@ -149,28 +121,38 @@ impl OperationsRepository {
     }
 
     // =========================================================================
-    //  ORDERS (Operação)
+    //  ORDERS
     // =========================================================================
 
-    pub async fn create_order_header<'e, E>(
+    // [CORREÇÃO] Combinamos "Buscar Stage Default" + "Criar Pedido" em uma única query.
+    // Isso evita o erro de "moved value executor" no Service.
+    pub async fn create_order_initial<'e, E>(
         &self,
         executor: E,
         tenant_id: Uuid,
         customer_id: Option<Uuid>,
         pipeline_id: Uuid,
-        stage_id: Uuid,
         notes: Option<&str>,
     ) -> Result<Order, AppError>
     where
         E: Executor<'e, Database = Postgres>,
     {
+        // A subquery (SELECT id FROM pipeline_stages ...) pega a primeira etapa automaticamente
         let order = sqlx::query_as!(
             Order,
             r#"
             INSERT INTO orders (
                 tenant_id, customer_id, pipeline_id, stage_id, notes
             )
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES (
+                $1, $2, $3,
+                (
+                    SELECT id FROM pipeline_stages
+                    WHERE pipeline_id = $3 AND tenant_id = $1
+                    ORDER BY position ASC LIMIT 1
+                ),
+                $4
+            )
             RETURNING
                 id, tenant_id, customer_id, pipeline_id, stage_id,
                 display_id, total_amount, total_discount, tags, notes,
@@ -179,7 +161,6 @@ impl OperationsRepository {
             tenant_id,
             customer_id,
             pipeline_id,
-            stage_id,
             notes
         )
             .fetch_one(executor)
@@ -223,6 +204,63 @@ impl OperationsRepository {
         Ok(item)
     }
 
+    // [CORREÇÃO] Recalcula e Atualiza em UMA única query.
+    // Resolve o problema de "borrow executor twice".
+    pub async fn recalculate_order_total<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+        order_id: Uuid,
+    ) -> Result<Decimal, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        // UPDATE com FROM/Subquery é super eficiente no Postgres
+        // Retorna o novo total calculado
+        let result = sqlx::query!(
+            r#"
+            UPDATE orders
+            SET total_amount = (
+                SELECT COALESCE(SUM(quantity * unit_price - discount), 0)
+                FROM order_items
+                WHERE order_items.order_id = orders.id
+            )
+            WHERE id = $1 AND tenant_id = $2
+            RETURNING total_amount
+            "#,
+            order_id,
+            tenant_id
+        )
+            .fetch_one(executor)
+            .await?;
+
+        Ok(result.total_amount)
+    }
+
+    pub async fn list_order_items<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+        order_id: Uuid,
+    ) -> Result<Vec<OrderItem>, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let items = sqlx::query_as!(
+            OrderItem,
+            r#"
+            SELECT * FROM order_items
+            WHERE tenant_id = $1 AND order_id = $2
+            "#,
+            tenant_id,
+            order_id
+        )
+            .fetch_all(executor)
+            .await?;
+
+        Ok(items)
+    }
+
     pub async fn update_order_stage<'e, E>(
         &self,
         executor: E,
@@ -249,49 +287,5 @@ impl OperationsRepository {
             .await?;
 
         Ok(())
-    }
-
-    // Atualiza o total do pedido somando os itens
-    pub async fn recalculate_order_total<'e, E>(
-        &self,
-        executor: E,
-        tenant_id: Uuid,
-        order_id: Uuid,
-    ) -> Result<Decimal, AppError>
-    where
-        E: Executor<'e, Database = Postgres>,
-    {
-        // 1. Soma os itens
-        let row = sqlx::query!(
-            r#"
-            SELECT COALESCE(SUM(quantity * unit_price - discount), 0) as total
-            FROM order_items
-            WHERE order_id = $1 AND tenant_id = $2
-            "#,
-            order_id,
-            tenant_id
-        )
-            .fetch_one(executor)
-            .await?;
-
-        let new_total: Decimal = row.total.unwrap_or(Decimal::ZERO);
-
-        // 2. Atualiza o header
-        sqlx::query!(
-            r#"
-            UPDATE orders SET total_amount = $1 WHERE id = $2
-            "#,
-            new_total,
-            order_id
-        )
-            // Note que aqui não podemos usar o mesmo executor se ele já estiver "gasto" (ex: fetch_one anterior).
-            // Mas como estamos passando 'executor' genérico, se for transaction funciona.
-            // Porém, sqlx exige re-borrow ou clone se for pool.
-            // O ideal é quem chamar essa função garantir a ordem.
-            .execute(executor) // Atenção aqui em rust puro, pode dar erro de borrow.
-            // No Service resolveremos isso usando Transaction reference.
-            .await?;
-
-        Ok(new_total)
     }
 }

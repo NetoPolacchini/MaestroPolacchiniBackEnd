@@ -59,6 +59,39 @@ impl InventoryRepository {
         Ok(items)
     }
 
+    pub async fn get_item<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+        item_id: Uuid,
+    ) -> Result<Option<Item>, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let item = sqlx::query_as!(
+            Item,
+            r#"
+            SELECT
+                id, tenant_id, sku, name, description,
+                base_unit_id as unit_id,
+                category_id,
+                kind as "kind: ItemKind",
+                settings,
+                cost_price, sale_price,
+                current_stock, min_stock,
+                created_at, updated_at
+            FROM items
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+            tenant_id,
+            item_id
+        )
+            .fetch_optional(executor)
+            .await?;
+
+        Ok(item)
+    }
+
     pub async fn get_all_categories<'e, E>(
         &self,
         executor: E,

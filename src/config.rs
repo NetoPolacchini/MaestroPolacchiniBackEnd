@@ -7,6 +7,7 @@ use crate::services::{
     tenancy_service::TenantService, // Nome correto da Struct
     crm_service::CrmService,
     rbac_service::RbacService,
+    operation_service::OperationsService
 };
 
 // Importe dos repositórios
@@ -34,6 +35,7 @@ pub struct AppState {
     pub crm_service: CrmService,
     pub rbac_repo: RbacRepository,
     pub rbac_service: RbacService,
+    pub operations_service: OperationsService,
 }
 
 // Uma função helper para carregar os arquivos
@@ -77,6 +79,8 @@ impl AppState {
         let inventory_repo = InventoryRepository::new(db_pool.clone());
         let tenant_repo = TenantRepository::new(db_pool.clone());
         let crm_repo = CrmRepository::new(db_pool.clone());
+        let operations_repo = crate::db::OperationsRepository::new(db_pool.clone());
+
 
         // [CORREÇÃO] RBAC Repo precisa ser criado ANTES de ser usado nos serviços
         let rbac_repo = RbacRepository::new(db_pool.clone());
@@ -91,6 +95,7 @@ impl AppState {
         );
 
         let inventory_service = InventoryService::new(inventory_repo.clone(), db_pool.clone());
+        let operations_service = OperationsService::new(operations_repo, inventory_service.clone());
 
         // [CORREÇÃO] TenantService agora recebe rbac_repo que já foi criado acima
         let tenant_service = TenantService::new(
@@ -116,7 +121,8 @@ impl AppState {
             crm_repo,
             crm_service,
             rbac_repo,
-            rbac_service
+            rbac_service,
+            operations_service
         })
     }
 }

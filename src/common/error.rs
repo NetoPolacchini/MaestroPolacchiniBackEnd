@@ -14,6 +14,9 @@ use crate::middleware::i18n::Locale;
 // Nosso tipo de erro principal (Enum do Backend)
 #[derive(Debug, Error)]
 pub enum AppError {
+
+
+
     #[error("Erro de validação")]
     ValidationError(#[from] validator::ValidationErrors),
 
@@ -55,6 +58,9 @@ pub enum AppError {
 
     #[error("Violação de restrição única: {0}")]
     UniqueConstraintViolation(String),
+
+    #[error("Não foi encontrado recursos")]
+    ResourceNotFound(String),
 
     #[error("Uma categoria com este nome já existe (neste nível): {0}")]
     CategoryNameAlreadyExists(String),
@@ -231,6 +237,10 @@ impl AppError {
             }
             AppError::UniqueConstraintViolation(val) => {
                 let t = get_template("UniqueConstraintViolation");
+                (StatusCode::CONFLICT, t.replace("{value}", &val), None)
+            }
+            AppError::ResourceNotFound(val) => {
+                let t = get_template("ResourceNotFound");
                 (StatusCode::CONFLICT, t.replace("{value}", &val), None)
             }
             AppError::RoleDoesNotExist(val) => {

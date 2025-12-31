@@ -183,7 +183,7 @@ pub async fn add_order_item(
 
     let cost = match item_data {
         Some(i) => i.cost_price.unwrap_or(Decimal::ZERO),
-        None => return Err(AppError::ResourceNotFound("Item not found".to_string()).to_api_error(&locale, &app_state.i18n_store)),    };
+        None => return Err(AppError::ResourceNotFound(item_data.unwrap().name.to_string()).to_api_error(&locale, &app_state.i18n_store)),    };
 
     // 2. Adiciona ao pedido usando o custo real do banco
     let item = app_state.operations_service
@@ -194,7 +194,7 @@ pub async fn add_order_item(
             payload.item_id,
             payload.quantity,
             payload.unit_price,
-            cost
+            cost // <--- Agora sim! Custo real.
         )
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
