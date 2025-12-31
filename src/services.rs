@@ -5,3 +5,4 @@ pub mod crm_service;
 pub mod rbac_service;
 pub mod operation_service;
 pub mod finance_service;
+pub mod dashboard_service;

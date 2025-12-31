@@ -10,6 +10,9 @@ pub mod rbac_repo;
 pub use rbac_repo::RbacRepository;
 pub mod operations_repo;
 pub mod finance_repo;
+pub mod dashboard_repo;
+pub use dashboard_repo::DashboardRepository;
+
 pub use finance_repo::FinanceRepository;
 
 pub use operations_repo::OperationsRepository;
