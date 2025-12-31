@@ -9,7 +9,8 @@ pub use crm_repo::CrmRepository;
 pub mod rbac_repo;
 pub use rbac_repo::RbacRepository;
 pub mod operations_repo;
-mod finance_repo;
+pub mod finance_repo;
+pub use finance_repo::FinanceRepository;
 
 pub use operations_repo::OperationsRepository;
 

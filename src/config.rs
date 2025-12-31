@@ -18,6 +18,7 @@ use std::{env, time::Duration};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
+use crate::services::finance_service::FinanceService;
 
 pub type I18nStore = Arc<HashMap<String, HashMap<String, String>>>;
 
@@ -36,6 +37,7 @@ pub struct AppState {
     pub rbac_repo: RbacRepository,
     pub rbac_service: RbacService,
     pub operations_service: OperationsService,
+    pub finance_service: FinanceService,
 }
 
 // Uma função helper para carregar os arquivos
@@ -80,6 +82,7 @@ impl AppState {
         let tenant_repo = TenantRepository::new(db_pool.clone());
         let crm_repo = CrmRepository::new(db_pool.clone());
         let operations_repo = crate::db::OperationsRepository::new(db_pool.clone());
+        let finance_repo = crate::db::FinanceRepository::new(db_pool.clone());
 
 
         // [CORREÇÃO] RBAC Repo precisa ser criado ANTES de ser usado nos serviços
@@ -94,8 +97,10 @@ impl AppState {
             db_pool.clone()
         );
 
+        let finance_service = FinanceService::new(finance_repo);
         let inventory_service = InventoryService::new(inventory_repo.clone(), db_pool.clone());
-        let operations_service = OperationsService::new(operations_repo, inventory_service.clone());
+        let operations_service = OperationsService::new(operations_repo, inventory_service.clone(), finance_service.clone());
+
 
         // [CORREÇÃO] TenantService agora recebe rbac_repo que já foi criado acima
         let tenant_service = TenantService::new(
@@ -122,7 +127,8 @@ impl AppState {
             crm_service,
             rbac_repo,
             rbac_service,
-            operations_service
+            operations_service,
+            finance_service
         })
     }
 }
