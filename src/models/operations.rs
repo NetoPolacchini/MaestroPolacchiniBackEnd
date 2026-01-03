@@ -81,3 +81,29 @@ pub struct OrderItem {
     // [CORREÇÃO] Faltava este campo que o SELECT * trazia
     pub created_at: DateTime<Utc>,
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderDetail {
+    #[serde(flatten)]
+    pub header: Order,
+
+    pub customer_name: Option<String>,
+    pub stage_name: String,
+    pub stage_category: PipelineCategory,
+
+    pub items: Vec<OrderItemDetail>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderItemDetail {
+    pub id: Uuid,
+    pub item_id: Uuid,
+    pub item_name: String,
+    pub sku: String,
+
+    pub quantity: Decimal,
+    pub unit_price: Decimal,
+    pub total: Decimal,
+}

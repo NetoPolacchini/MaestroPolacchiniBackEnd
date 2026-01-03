@@ -5,3 +5,4 @@ pub mod crm;
 pub(crate) mod rbac;
 pub(crate) mod operations;
 pub(crate) mod dashboard;
+pub(crate) mod documents;

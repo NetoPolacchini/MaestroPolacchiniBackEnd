@@ -105,6 +105,11 @@ async fn main() {
                ,post(handlers::operations::transition_order)
         )
 
+        //Gerar PDF
+        .route("/documents/orders/{id}/pdf"
+               ,get(handlers::documents::generate_order_pdf)
+        )
+
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),
             tenant_guard,

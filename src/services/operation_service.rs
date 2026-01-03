@@ -125,7 +125,7 @@ impl OperationsService {
 
     pub async fn transition_order<'e, E>(
         &self,
-        mut tx: E,
+        tx: E,
         tenant_id: Uuid,
         order_id: Uuid,
         new_stage_id: Uuid,

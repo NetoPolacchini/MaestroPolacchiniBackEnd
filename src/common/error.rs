@@ -62,6 +62,9 @@ pub enum AppError {
     #[error("Não foi encontrado recursos")]
     ResourceNotFound(String),
 
+    #[error("Não foi encontrada a fonte")]
+    FontNotFound(String),
+
     #[error("Uma categoria com este nome já existe (neste nível): {0}")]
     CategoryNameAlreadyExists(String),
 

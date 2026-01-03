@@ -53,3 +53,5 @@ anyhow = "1.0.99"
 rust_decimal = {version = "1.39.0", features = ["serde-float"]}
 inventory = "0.3.21"
 
+genpdf = "0.2"
+

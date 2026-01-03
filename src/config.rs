@@ -9,6 +9,7 @@ use crate::services::{
     rbac_service::RbacService,
     operation_service::OperationsService,
     dashboard_service::DashboardService,
+    document_service::DocumentService,
 };
 
 // Importe dos repositórios
@@ -40,6 +41,7 @@ pub struct AppState {
     pub operations_service: OperationsService,
     pub finance_service: FinanceService,
     pub dashboard_service: DashboardService,
+    pub document_service: DocumentService
 }
 
 // Uma função helper para carregar os arquivos
@@ -102,6 +104,7 @@ impl AppState {
 
         let finance_service = FinanceService::new(finance_repo);
         let inventory_service = InventoryService::new(inventory_repo.clone(), db_pool.clone());
+        let document_service = DocumentService::new(operations_repo.clone());
         let operations_service = OperationsService::new(operations_repo, inventory_service.clone(), finance_service.clone());
         let dashboard_service = DashboardService::new(dashboard_repo);
 
@@ -113,6 +116,7 @@ impl AppState {
         );
 
         let crm_service = CrmService::new(crm_repo.clone());
+
 
         let rbac_service = RbacService::new(rbac_repo.clone(), db_pool.clone());
 
@@ -132,7 +136,8 @@ impl AppState {
             rbac_service,
             operations_service,
             finance_service,
-            dashboard_service
+            dashboard_service,
+            document_service
         })
     }
 }

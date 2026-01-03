@@ -5,7 +5,7 @@ use uuid::Uuid;
 use rust_decimal::Decimal;
 use crate::{
     common::error::AppError,
-    models::operations::{Pipeline, PipelineStage, Order, OrderItem, PipelineCategory},
+    models::operations::{Pipeline, PipelineStage, Order, OrderItem, PipelineCategory, OrderDetail},
 };
 
 #[derive(Clone)]
@@ -287,5 +287,57 @@ impl OperationsRepository {
             .await?;
 
         Ok(())
+    }
+
+    pub async fn get_order_detail<'e, E>(
+        &self,
+        executor: E,
+        tenant_id: Uuid,
+        order_id: Uuid,
+    ) -> Result<OrderDetail, AppError>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        // Vamos buscar o Order + Nome do Cliente + Nome da Etapa
+        // Note que OrderDetail foi definido no models/operations.rs mas talvez precisemos ajustar a query
+        // para bater com os campos da struct.
+
+        // Vamos fazer uma query manual para preencher a struct OrderDetail
+        // Se a struct OrderDetail for complexa, vamos simplificar e criar uma struct local ou
+        // usar um JOIN simples.
+
+        // Vamos focar no essencial para o PDF: Header + Customer Name.
+        // O OrderDetail pede 'items' também, mas vamos preencher os items separadamente no service.
+
+        let header = sqlx::query_as!(
+            Order,
+            "SELECT * FROM orders WHERE id = $1 AND tenant_id = $2",
+            order_id, tenant_id
+        ).fetch_one(executor).await?;
+
+        // Buscamos nomes auxiliares
+        let aux = sqlx::query!(
+            r#"
+            SELECT
+                c.full_name as "customer_name?",
+                s.name as stage_name,
+                s.category as "category: PipelineCategory"
+            FROM orders o
+            JOIN pipeline_stages s ON o.stage_id = s.id
+            LEFT JOIN customers c ON o.customer_id = c.id
+            WHERE o.id = $1
+            "#,
+            order_id
+        ).fetch_one(&self.pool.clone()).await?; // Usamos pool aqui pra facilitar, pois o executor foi movido acima
+
+        // Retornamos um objeto montado.
+        // Nota: O ideal seria uma query única com JOIN, mas para manter didático:
+        Ok(OrderDetail {
+            header,
+            customer_name: aux.customer_name,
+            stage_name: aux.stage_name,
+            stage_category: aux.category,
+            items: vec![], // Preencheremos no Service
+        })
     }
 }

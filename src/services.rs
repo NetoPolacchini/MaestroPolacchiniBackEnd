@@ -6,3 +6,4 @@ pub mod rbac_service;
 pub mod operation_service;
 pub mod finance_service;
 pub mod dashboard_service;
+pub mod document_service;
