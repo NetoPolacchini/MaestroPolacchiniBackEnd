@@ -11,6 +11,9 @@ pub use rbac_repo::RbacRepository;
 pub mod operations_repo;
 pub mod finance_repo;
 pub mod dashboard_repo;
+pub mod settings_repo;
+pub use settings_repo::SettingsRepository;
+
 pub use dashboard_repo::DashboardRepository;
 
 pub use finance_repo::FinanceRepository;

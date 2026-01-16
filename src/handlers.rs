@@ -6,3 +6,4 @@ pub(crate) mod rbac;
 pub(crate) mod operations;
 pub(crate) mod dashboard;
 pub(crate) mod documents;
+pub(crate) mod settings;

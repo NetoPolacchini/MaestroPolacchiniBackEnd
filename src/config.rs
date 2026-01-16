@@ -13,7 +13,7 @@ use crate::services::{
 };
 
 // Importe dos repositórios
-use crate::db::{UserRepository, InventoryRepository, TenantRepository, CrmRepository, RbacRepository};
+use crate::db::{UserRepository, InventoryRepository, TenantRepository, CrmRepository, RbacRepository, SettingsRepository};
 
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::{env, time::Duration};
@@ -41,7 +41,8 @@ pub struct AppState {
     pub operations_service: OperationsService,
     pub finance_service: FinanceService,
     pub dashboard_service: DashboardService,
-    pub document_service: DocumentService
+    pub document_service: DocumentService,
+    pub settings_repo: SettingsRepository,
 }
 
 // Uma função helper para carregar os arquivos
@@ -88,6 +89,7 @@ impl AppState {
         let operations_repo = crate::db::OperationsRepository::new(db_pool.clone());
         let finance_repo = crate::db::FinanceRepository::new(db_pool.clone());
         let dashboard_repo = crate::db::DashboardRepository::new(db_pool.clone());
+        let settings_repo = SettingsRepository::new(db_pool.clone());
 
 
         // [CORREÇÃO] RBAC Repo precisa ser criado ANTES de ser usado nos serviços
@@ -102,9 +104,12 @@ impl AppState {
             db_pool.clone()
         );
 
-        let finance_service = FinanceService::new(finance_repo);
+        let finance_service = FinanceService::new(finance_repo.clone());
         let inventory_service = InventoryService::new(inventory_repo.clone(), db_pool.clone());
-        let document_service = DocumentService::new(operations_repo.clone());
+        let document_service = DocumentService::new(
+            operations_repo.clone(),
+            settings_repo.clone()
+        );
         let operations_service = OperationsService::new(operations_repo, inventory_service.clone(), finance_service.clone());
         let dashboard_service = DashboardService::new(dashboard_repo);
 
@@ -129,7 +134,7 @@ impl AppState {
             inventory_service,
             inventory_repo,
             tenant_repo,
-            tenant_service, // Variável local tenant_service -> Campo tenant_service
+            tenant_service,
             crm_repo,
             crm_service,
             rbac_repo,
@@ -137,7 +142,8 @@ impl AppState {
             operations_service,
             finance_service,
             dashboard_service,
-            document_service
+            document_service,
+            settings_repo,
         })
     }
 }
