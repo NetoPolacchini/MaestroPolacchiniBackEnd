@@ -7,6 +7,10 @@ use axum::{
 };
 use tokio::net::TcpListener;
 
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
+use crate::docs::ApiDoc;
+
 mod common;
 mod config;
 mod db;
@@ -14,6 +18,7 @@ mod handlers;
 mod middleware;
 mod models;
 mod services;
+mod docs;
 
 use crate::config::AppState;
 use crate::middleware::auth::{auth_guard, tenant_guard};
@@ -127,7 +132,8 @@ async fn main() {
         .nest("/api/documents", document_routes) // Agora em /api/documents/orders/...
         .nest("/api/settings", settings_routes)  // Agora em /api/settings
         .nest("/api/rbac", rbac_routes)          // Ajustei para /api/rbac para não conflitar com /api/tenants
-        .with_state(app_state);
+        .with_state(app_state)
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()));
 
     let addr = "0.0.0.0:3000";
     let listener = TcpListener::bind(addr)

@@ -20,8 +20,21 @@ use crate::{
     },
     models::settings::UpdateSettingsRequest,
 };
+use crate::models::settings::TenantSettings;
 
 // GET /api/settings
+#[utoipa::path(
+    get,
+    path = "/api/settings",
+    tag = "Settings",
+    responses(
+        (status = 200, description = "Configurações da loja recuperadas", body = TenantSettings),
+        (status = 401, description = "Não autorizado"),
+    ),
+    security(
+        ("api_jwt" = []) // Define que precisa do cadeadinho (Token)
+    )
+)]
 pub async fn get_settings(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -43,6 +56,19 @@ pub async fn get_settings(
 }
 
 // PUT /api/settings
+#[utoipa::path(
+    put,
+    path = "/api/settings",
+    tag = "Settings",
+    request_body = UpdateSettingsRequest, // Define o corpo da requisição
+    responses(
+        (status = 200, description = "Configurações atualizadas", body = TenantSettings),
+        (status = 401, description = "Não autorizado"),
+    ),
+    security(
+        ("api_jwt" = [])
+    )
+)]
 pub async fn update_settings(
     State(app_state): State<AppState>,
     locale: Locale,

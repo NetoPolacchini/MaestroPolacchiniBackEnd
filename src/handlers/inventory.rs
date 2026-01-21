@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
+use utoipa::ToSchema;
 
 use crate::{
     common::{
@@ -24,13 +25,14 @@ use crate::{
         tenancy::TenantContext,
         rbac::{RequirePermission, PermInventoryWrite},
     },
-    // Importamos os novos Enums
-    models::inventory::{StockMovementReason, ItemKind, CompositionType},
+    models::inventory::{
+        StockMovementReason, ItemKind, CompositionType,
+        Item, CompositionEntry, UnitOfMeasure, Category, InventoryLevel
+    },
 };
 use chrono::NaiveDate;
 
 // --- Validações Auxiliares ---
-
 fn validate_not_negative(val: &Decimal) -> Result<(), ValidationError> {
     if val.is_sign_negative() {
         let mut err = ValidationError::new("range");
@@ -41,59 +43,62 @@ fn validate_not_negative(val: &Decimal) -> Result<(), ValidationError> {
 }
 
 // =============================================================================
-//  CREATE ITEM (ATUALIZADO)
+//  CREATE ITEM
 // =============================================================================
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateItemPayload {
-    // Campos Básicos
     #[validate(length(min = 1, message = "O SKU é obrigatório."))]
+    #[schema(example = "PROD-ABC-001")]
     pub sku: String,
 
     #[validate(length(min = 1, message = "O nome é obrigatório."))]
+    #[schema(example = "Produto Exemplo")]
     pub name: String,
 
+    #[schema(example = "Descrição detalhada do produto")]
     pub description: Option<String>,
 
     #[validate(required(message = "O campo 'categoryId' é obrigatório."))]
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440001")]
     pub category_id: Option<Uuid>,
 
     #[validate(required(message = "O campo 'baseUnitId' é obrigatório."))]
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440002")]
     pub base_unit_id: Option<Uuid>,
 
-    // [NOVO] Tipo do Item (Product, Service, Resource, Bundle)
-    // Se não vier, o serde pode falhar ou podemos assumir Product no front
+    #[schema(example = "Product")]
     pub kind: ItemKind,
 
-    // [NOVO] Configurações Flexíveis (JSON)
+    // Configurações Flexíveis (JSON)
     pub settings: Option<Value>,
 
-    // Preços
     #[validate(custom(function = "validate_not_negative"))]
+    #[schema(example = "50.00")]
     pub sale_price: Decimal,
 
-    // Estoque Inicial (Opcional se for Serviço, Obrigatório se tiver stock > 0)
+    // Estoque Inicial
     pub location_id: Option<Uuid>,
 
     #[validate(custom(function = "validate_not_negative"))]
     #[serde(default)]
+    #[schema(example = "100.0")]
     pub initial_stock: Decimal,
 
     #[validate(custom(function = "validate_not_negative"))]
     #[serde(default)]
+    #[schema(example = "25.00")]
     pub initial_cost: Decimal,
 
     #[validate(custom(function = "validate_not_negative"))]
     #[serde(default)]
+    #[schema(example = "10.0")]
     pub low_stock_threshold: Decimal,
 }
 
-// Validação de Consistência
 impl CreateItemPayload {
     fn validate_consistency(&self) -> Result<(), ValidationError> {
-        // Regra 1: Se for PRODUTO e tiver estoque inicial > 0, precisa de local.
-        // Se for SERVIÇO, initial_stock é ignorado no backend, então não cobramos location.
         if self.kind == ItemKind::Product && self.initial_stock > Decimal::ZERO && self.location_id.is_none() {
             return Err(ValidationError::new("LocationRequiredForStock"));
         }
@@ -101,6 +106,22 @@ impl CreateItemPayload {
     }
 }
 
+// POST /api/inventory/items
+#[utoipa::path(
+    post,
+    path = "/api/inventory/items",
+    tag = "Inventory",
+    request_body = CreateItemPayload,
+    responses(
+        (status = 201, description = "Item criado com sucesso", body = Item),
+        (status = 400, description = "Dados inválidos"),
+        (status = 403, description = "Sem permissão")
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn create_item(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -130,19 +151,16 @@ pub async fn create_item(
             tenant.0,
             payload.location_id,
             payload.category_id,
-            payload.base_unit_id.unwrap(), // Validado pelo required
+            payload.base_unit_id.unwrap(),
             &payload.sku,
             &payload.name,
             payload.description.as_deref(),
-
-            // Novos Argumentos
             payload.kind,
             payload.settings,
-
             payload.initial_stock,
             payload.initial_cost,
             payload.sale_price,
-            None, // min_stock (futuro)
+            None,
             payload.low_stock_threshold,
         )
         .await
@@ -152,26 +170,44 @@ pub async fn create_item(
 }
 
 // =============================================================================
-//  COMPOSIÇÃO / FICHA TÉCNICA (NOVO)
+//  COMPOSIÇÃO / FICHA TÉCNICA
 // =============================================================================
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AddCompositionPayload {
     pub child_item_id: Uuid,
 
     #[validate(custom(function = "validate_not_negative"))]
+    #[schema(example = "0.5")]
     pub quantity: Decimal,
 
+    #[schema(example = "Component")]
     pub comp_type: CompositionType,
 }
 
+// POST /api/inventory/items/{id}/composition
+#[utoipa::path(
+    post,
+    path = "/api/inventory/items/{parent_id}/composition",
+    tag = "Inventory",
+    params(
+        ("parent_id" = Uuid, Path, description = "ID do Item Pai (Produto Final)"),
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    request_body = AddCompositionPayload,
+    responses(
+        (status = 201, description = "Item adicionado à composição"),
+        (status = 404, description = "Item não encontrado")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn add_composition_item(
     State(app_state): State<AppState>,
     locale: Locale,
     user: AuthenticatedUser,
     tenant: TenantContext,
-    Path(parent_id): Path<Uuid>, // ID do item pai na URL
+    Path(parent_id): Path<Uuid>,
     Json(payload): Json<AddCompositionPayload>,
 ) -> Result<impl IntoResponse, ApiError> {
 
@@ -197,6 +233,20 @@ pub async fn add_composition_item(
     Ok(StatusCode::CREATED)
 }
 
+// GET /api/inventory/items/{id}/composition
+#[utoipa::path(
+    get,
+    path = "/api/inventory/items/{parent_id}/composition",
+    tag = "Inventory",
+    params(
+        ("parent_id" = Uuid, Path, description = "ID do Item Pai"),
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    responses(
+        (status = 200, description = "Lista de componentes", body = Vec<CompositionEntry>)
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn get_item_composition(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -218,9 +268,22 @@ pub async fn get_item_composition(
 }
 
 // =============================================================================
-//  GET ITEMS (Mantido e atualizado RLS)
+//  GET ITEMS
 // =============================================================================
 
+// GET /api/inventory/items
+#[utoipa::path(
+    get,
+    path = "/api/inventory/items",
+    tag = "Inventory",
+    responses(
+        (status = 200, description = "Listagem de Itens", body = Vec<Item>)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn get_all_items(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -241,20 +304,33 @@ pub async fn get_all_items(
 }
 
 // =============================================================================
-//  AUXILIARES (Categories, Units) - Mantenha o código existente
-//  (Copie e cole aqui os handlers create_unit, get_all_units, create_category, etc.)
-//  Eles não mudaram de lógica, apenas precisam estar presentes no arquivo final.
+//  AUXILIARES (Categories, Units)
 // =============================================================================
 
-// --- Payload: CreateUnitPayload ---
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct CreateUnitPayload {
     #[validate(length(min = 1, message = "O nome é obrigatório."))]
+    #[schema(example = "Quilograma")]
     pub name: String,
     #[validate(length(min = 1, message = "O símbolo é obrigatório."))]
+    #[schema(example = "kg")]
     pub symbol: String,
 }
 
+// POST /api/inventory/units
+#[utoipa::path(
+    post,
+    path = "/api/inventory/units",
+    tag = "Inventory",
+    request_body = CreateUnitPayload,
+    responses(
+        (status = 201, description = "Unidade criada", body = UnitOfMeasure)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn create_unit_of_measure(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -268,6 +344,19 @@ pub async fn create_unit_of_measure(
     Ok((StatusCode::CREATED, Json(unit)))
 }
 
+// GET /api/inventory/units
+#[utoipa::path(
+    get,
+    path = "/api/inventory/units",
+    tag = "Inventory",
+    responses(
+        (status = 200, description = "Lista de unidades", body = Vec<UnitOfMeasure>)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn get_all_units(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -279,16 +368,30 @@ pub async fn get_all_units(
     Ok((StatusCode::OK, Json(units)))
 }
 
-// --- Payload: CreateCategoryPayload ---
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCategoryPayload {
     #[validate(length(min = 1, message = "O nome é obrigatório."))]
+    #[schema(example = "Bebidas")]
     pub name: String,
     pub description: Option<String>,
     pub parent_id: Option<Uuid>,
 }
 
+// POST /api/inventory/categories
+#[utoipa::path(
+    post,
+    path = "/api/inventory/categories",
+    tag = "Inventory",
+    request_body = CreateCategoryPayload,
+    responses(
+        (status = 201, description = "Categoria criada", body = Category)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn create_category(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -302,6 +405,19 @@ pub async fn create_category(
     Ok((StatusCode::CREATED, Json(category)))
 }
 
+// GET /api/inventory/categories
+#[utoipa::path(
+    get,
+    path = "/api/inventory/categories",
+    tag = "Inventory",
+    responses(
+        (status = 200, description = "Lista de categorias", body = Vec<Category>)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn get_all_categories(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -317,15 +433,18 @@ pub async fn get_all_categories(
 //  MOVIMENTAÇÃO DE ESTOQUE (Add/Sell)
 // =============================================================================
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AddStockPayload {
     pub location_id: Uuid,
     pub item_id: Uuid,
     #[validate(custom(function = "validate_not_negative"))]
+    #[schema(example = "100.0")]
     pub quantity: Decimal,
     #[validate(custom(function = "validate_not_negative"))]
+    #[schema(example = "25.50")]
     pub unit_cost: Decimal,
+    #[schema(example = "Purchase")]
     pub reason: StockMovementReason,
     pub notes: Option<String>,
     pub batch_number: Option<String>,
@@ -333,6 +452,20 @@ pub struct AddStockPayload {
     pub position: Option<String>,
 }
 
+// POST /api/inventory/stock-entry
+#[utoipa::path(
+    post,
+    path = "/api/inventory/stock-entry",
+    tag = "Inventory",
+    request_body = AddStockPayload,
+    responses(
+        (status = 200, description = "Estoque adicionado", body = InventoryLevel)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn add_stock(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -350,19 +483,35 @@ pub async fn add_stock(
     Ok((StatusCode::OK, Json(updated_level)))
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SellItemPayload {
     pub location_id: Uuid,
     pub item_id: Uuid,
     #[validate(custom(function = "validate_not_negative"))]
+    #[schema(example = "1.0")]
     pub quantity: Decimal,
     #[validate(custom(function = "validate_not_negative"))]
+    #[schema(example = "50.00")]
     pub unit_price: Decimal,
     pub batch_number: Option<String>,
     pub position: Option<String>,
 }
 
+// POST /api/inventory/sell
+#[utoipa::path(
+    post,
+    path = "/api/inventory/sell",
+    tag = "Inventory",
+    request_body = SellItemPayload,
+    responses(
+        (status = 200, description = "Item vendido (estoque baixado)")
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn sell_item(
     State(app_state): State<AppState>,
     locale: Locale,

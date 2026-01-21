@@ -6,11 +6,11 @@ edition = "2024"
 [dependencies]
 
 # O runtime assíncrono principal
-tokio = { version = "1.32.0", features = ["full"] }
+tokio = { version = "1.49.0", features = ["full"] }
 
 # O framework web
-axum = {version = "0.8.7"}
-axum-extra = { version = "0.12.2", features = ["typed-header"] }
+axum = {version = "0.8.8"}
+axum-extra = { version = "0.12.5", features = ["typed-header"] }
 accept-language = "3.1.0"
 
 
@@ -18,8 +18,8 @@ accept-language = "3.1.0"
 async-trait = "0.1.89"
 
 # Para serialização e desserialização de dados (JSON)
-serde = { version = "1.0.188", features = ["derive"] }
-serde_json = "1.0.107"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
 
 # Toolkit SQL para interagir com o banco de dados de forma segura
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "rust_decimal"] }
@@ -28,29 +28,29 @@ sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "uui
 dotenvy = "0.15.7"
 
 # Para logging
-tracing = "0.1.37"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 # Hashing de Senhas
-bcrypt = "0.17.1"
+bcrypt = "0.18.0"
 
-thiserror = "2.0.16"
+thiserror = "2.0.17"
 
 # JSON Web Tokens (JWT)
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 
 # Gerador de IDs únicos
-uuid = { version = "1.8.0", features = ["v4", "serde"] }
+uuid = { version = "1.19.0", features = ["v4", "serde"] }
 
 # Manipulação de Datas
-chrono = { version = "0.4.38", features = ["serde"] }
+chrono = { version = "0.4.43", features = ["serde"] }
 
 # Validação de dados de entrada
 validator = { version = "0.20.0", features = ["derive"] }
 
-anyhow = "1.0.99"
+anyhow = "1.0.100"
 
-rust_decimal = {version = "1.39.0", features = ["serde-float"]}
+rust_decimal = {version = "1.40.0", features = ["serde-float"]}
 inventory = "0.3.21"
 
 genpdf = { version = "0.2", features = ["images"] }
@@ -58,4 +58,8 @@ genpdf = { version = "0.2", features = ["images"] }
 # Adicione estas:
 qrcode = "0.12"
 image = "0.23.14" # Versão compatível com genpdf 0.2
+
+# DOCS
+utoipa = { version = "5.4.0", features = ["uuid", "chrono", "decimal", "axum_extras"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 

@@ -10,6 +10,7 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use uuid::Uuid;
 use validator::Validate;
+use utoipa::ToSchema; // <--- Importe ToSchema
 
 use crate::{
     common::{
@@ -22,24 +23,40 @@ use crate::{
         i18n::Locale,
         tenancy::TenantContext,
     },
-    models::operations::PipelineCategory,
+    // Importe os models de resposta para o Swagger
+    models::operations::{Pipeline, PipelineStage, PipelineCategory, Order, OrderItem},
 };
 
 // =============================================================================
 //  1. CONFIGURAÇÃO (PIPELINES & STAGES)
-//  Usado principalmente pelos Seeds/Templates
 // =============================================================================
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)] // <--- ToSchema
 #[serde(rename_all = "camelCase")]
 pub struct CreatePipelinePayload {
     #[validate(length(min = 1, message = "required"))]
+    #[schema(example = "Funil de Vendas B2B")]
     pub name: String,
 
     #[serde(default)]
+    #[schema(example = true)]
     pub is_default: bool,
 }
 
+// POST /api/operations/pipelines
+#[utoipa::path(
+    post,
+    path = "/api/operations/pipelines",
+    tag = "Operations",
+    request_body = CreatePipelinePayload,
+    responses(
+        (status = 201, description = "Funil criado", body = Pipeline)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn create_pipeline(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -63,20 +80,39 @@ pub async fn create_pipeline(
     Ok((StatusCode::CREATED, Json(pipeline)))
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)] // <--- ToSchema
 #[serde(rename_all = "camelCase")]
 pub struct AddStagePayload {
     #[validate(length(min = 1, message = "required"))]
+    #[schema(example = "Negociação")]
     pub name: String,
 
+    #[schema(example = "Active")]
     pub category: PipelineCategory,
 
+    #[schema(example = 1)]
     pub position: i32,
 
-    // Configurações Avançadas (Gatilhos)
-    pub stock_action: Option<String>, // "NONE", "RESERVE", "DEDUCT"
+    //TodO: Trocar segundo example
+    #[schema(example = "RESERVE", example = "Ação de estoque: NONE, RESERVE, DEDUCT")]
+    pub stock_action: Option<String>,
 }
 
+// POST /api/operations/pipelines/{id}/stages
+#[utoipa::path(
+    post,
+    path = "/api/operations/pipelines/{pipeline_id}/stages",
+    tag = "Operations",
+    request_body = AddStagePayload,
+    responses(
+        (status = 201, description = "Etapa adicionada ao funil", body = PipelineStage)
+    ),
+    params(
+        ("pipeline_id" = Uuid, Path, description = "ID do Funil"),
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn add_stage(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -113,14 +149,32 @@ pub async fn add_stage(
 //  2. OPERAÇÃO (PEDIDOS)
 // =============================================================================
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)] // <--- ToSchema
 #[serde(rename_all = "camelCase")]
 pub struct CreateOrderPayload {
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
     pub pipeline_id: Uuid,
+
     pub customer_id: Option<Uuid>,
+
+    #[schema(example = "Pedido urgente do cliente VIP")]
     pub notes: Option<String>,
 }
 
+// POST /api/operations/orders
+#[utoipa::path(
+    post,
+    path = "/api/operations/orders",
+    tag = "Operations",
+    request_body = CreateOrderPayload,
+    responses(
+        (status = 201, description = "Pedido criado (iniciado na 1ª etapa)", body = Order)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn create_order(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -148,19 +202,34 @@ pub async fn create_order(
     Ok((StatusCode::CREATED, Json(order)))
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)] // <--- ToSchema
 #[serde(rename_all = "camelCase")]
 pub struct AddOrderItemPayload {
     pub item_id: Uuid,
 
-    // O usuário diz quanto quer vender e a que preço (pode ter desconto manual)
+    #[schema(example = "2.0")]
     pub quantity: Decimal,
-    pub unit_price: Decimal,
 
-    // NOTA: unit_cost não vem do frontend por segurança.
-    // Deveria ser buscado do cadastro do item. Por enquanto passaremos 0.
+    #[schema(example = "50.00")]
+    pub unit_price: Decimal,
 }
 
+// POST /api/operations/orders/{id}/items
+#[utoipa::path(
+    post,
+    path = "/api/operations/orders/{order_id}/items",
+    tag = "Operations",
+    request_body = AddOrderItemPayload,
+    responses(
+        (status = 201, description = "Item adicionado ao pedido", body = OrderItem),
+        (status = 404, description = "Pedido ou Item não encontrado")
+    ),
+    params(
+        ("order_id" = Uuid, Path, description = "ID do Pedido"),
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn add_order_item(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -174,8 +243,6 @@ pub async fn add_order_item(
         .await
         .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;
 
-    // 1. Busca o Item para saber o Custo (Cost Price)
-    // Isso evita que a gente passe 0 ou confie no frontend para dados sensíveis
     let item_data = app_state.inventory_service
         .get_item(&mut *rls_conn, tenant.0, payload.item_id)
         .await
@@ -183,9 +250,9 @@ pub async fn add_order_item(
 
     let cost = match item_data {
         Some(i) => i.cost_price.unwrap_or(Decimal::ZERO),
-        None => return Err(AppError::ResourceNotFound(item_data.unwrap().name.to_string()).to_api_error(&locale, &app_state.i18n_store)),    };
+        None => return Err(AppError::ResourceNotFound(format!("Item {}", payload.item_id)).to_api_error(&locale, &app_state.i18n_store)), // Pequena correção para string
+    };
 
-    // 2. Adiciona ao pedido usando o custo real do banco
     let item = app_state.operations_service
         .add_item_to_order(
             &mut *rls_conn,
@@ -194,7 +261,7 @@ pub async fn add_order_item(
             payload.item_id,
             payload.quantity,
             payload.unit_price,
-            cost // <--- Agora sim! Custo real.
+            cost
         )
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
@@ -206,12 +273,28 @@ pub async fn add_order_item(
 //  3. TRANSIÇÃO (A MÁGICA)
 // =============================================================================
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)] // <--- ToSchema
 #[serde(rename_all = "camelCase")]
 pub struct TransitionOrderPayload {
     pub new_stage_id: Uuid,
 }
 
+// POST /api/operations/orders/{id}/transition
+#[utoipa::path(
+    post,
+    path = "/api/operations/orders/{order_id}/transition",
+    tag = "Operations",
+    request_body = TransitionOrderPayload,
+    responses(
+        (status = 200, description = "Pedido movido para nova etapa (Estoque/Financeiro atualizados)"),
+        (status = 400, description = "Transição inválida")
+    ),
+    params(
+        ("order_id" = Uuid, Path, description = "ID do Pedido"),
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn transition_order(
     State(app_state): State<AppState>,
     locale: Locale,

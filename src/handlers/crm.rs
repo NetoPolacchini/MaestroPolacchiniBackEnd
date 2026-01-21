@@ -7,35 +7,51 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use validator::Validate;
 use chrono::NaiveDate;
-use uuid::Uuid; // <--- Não esqueça de importar Uuid
+use uuid::Uuid;
+use utoipa::ToSchema; 
 
 use crate::{
     common::error::{ApiError, AppError},
     config::AppState,
     middleware::{tenancy::TenantContext, i18n::Locale},
-    // Importamos os Enums e Structs necessários
-    models::crm::{FieldType},
+    models::crm::{FieldType, EntityType, FieldDefinition, Customer}, // Importe os models de resposta
 };
 use crate::models::auth::DocumentType;
 
 // =============================================================================
-//  ÁREA 1: TIPOS DE ENTIDADE (NOVO)
-//  Ex: Criar "Paciente", "Aluno", "Veículo"
+//  ÁREA 1: TIPOS DE ENTIDADE
 // =============================================================================
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)] // <--- ToSchema
 #[serde(rename_all = "camelCase")]
 pub struct CreateEntityTypePayload {
     #[validate(length(min = 2, message = "O nome deve ter no mínimo 2 caracteres"))]
-    pub name: String, // Ex: "Paciente"
+    #[schema(example = "Paciente")]
+    pub name: String,
 
     #[validate(length(min = 2, message = "O slug deve ter no mínimo 2 caracteres"))]
-    pub slug: String, // Ex: "paciente"
+    #[schema(example = "paciente")]
+    pub slug: String,
 }
 
+// POST /api/crm/types
+#[utoipa::path(
+    post,
+    path = "/api/crm/types",
+    tag = "CRM",
+    request_body = CreateEntityTypePayload,
+    responses(
+        (status = 201, description = "Tipo de Entidade criado", body = EntityType),
+        (status = 400, description = "Dados inválidos")
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn create_entity_type(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -59,6 +75,19 @@ pub async fn create_entity_type(
     Ok((StatusCode::CREATED, Json(entity_type)))
 }
 
+// GET /api/crm/types
+#[utoipa::path(
+    get,
+    path = "/api/crm/types",
+    tag = "CRM",
+    responses(
+        (status = 200, description = "Lista de Tipos de Entidade", body = Vec<EntityType>)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn list_entity_types(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -75,30 +104,47 @@ pub async fn list_entity_types(
 
 // =============================================================================
 //  ÁREA 2: CONFIGURAÇÃO (DEFINIÇÕES DE CAMPO)
-//  Atualizado para aceitar 'entityTypeId'
 // =============================================================================
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)] // <--- ToSchema
 #[serde(rename_all = "camelCase")]
 pub struct CreateFieldPayload {
-    // [NOVO] O campo pertence a um tipo? (Ex: "Convênio" pertence a "Paciente")
-    // Se nulo, é um campo Global.
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
     pub entity_type_id: Option<Uuid>,
 
     #[validate(length(min = 1, message = "required"))]
+    #[schema(example = "Tamanho da Camiseta")]
     pub name: String,
 
     #[validate(length(min = 1, message = "required"))]
+    #[schema(example = "tamanho_camiseta")]
     pub key_name: String,
 
-    pub field_type: FieldType, // Enum FieldType
+    #[schema(example = "Select")]
+    pub field_type: FieldType,
 
+    #[schema(example = json!(["P", "M", "G"]))]
     pub options: Option<Value>,
 
     #[serde(default)]
+    #[schema(example = true)]
     pub is_required: bool,
 }
 
+// POST /api/crm/fields
+#[utoipa::path(
+    post,
+    path = "/api/crm/fields",
+    tag = "CRM",
+    request_body = CreateFieldPayload,
+    responses(
+        (status = 201, description = "Campo customizado criado", body = FieldDefinition)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn create_field_definition(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -113,7 +159,7 @@ pub async fn create_field_definition(
         .create_field_definition(
             &app_state.db_pool,
             tenant.0,
-            payload.entity_type_id, // Passando o novo argumento
+            payload.entity_type_id,
             &payload.name,
             &payload.key_name,
             payload.field_type,
@@ -126,6 +172,19 @@ pub async fn create_field_definition(
     Ok((StatusCode::CREATED, Json(field)))
 }
 
+// GET /api/crm/fields
+#[utoipa::path(
+    get,
+    path = "/api/crm/fields",
+    tag = "CRM",
+    responses(
+        (status = 200, description = "Lista de campos customizados", body = Vec<FieldDefinition>)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn list_field_definitions(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -142,38 +201,59 @@ pub async fn list_field_definitions(
 
 // =============================================================================
 //  ÁREA 3: OPERAÇÃO (CLIENTES)
-//  Atualizado para aceitar 'entityTypes' (Ex: "Esse cliente é Paciente e Aluno")
 // =============================================================================
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)] // <--- ToSchema
 #[serde(rename_all = "camelCase")]
 pub struct CreateCustomerPayload {
     #[validate(length(min = 1, message = "required"))]
+    #[schema(example = "Maria da Silva")]
     pub full_name: String,
 
     #[validate(length(equal = 2, message = "invalid_country_code"))]
+    #[schema(example = "BR")]
     pub country_code: Option<String>,
 
     pub document_type: Option<DocumentType>,
+    #[schema(example = "12345678900")]
     pub document_number: Option<String>,
 
+    #[schema(value_type = Option<String>, format = Date, example = "1990-05-20")]
     pub birth_date: Option<NaiveDate>,
 
     #[validate(email(message = "invalid_email"))]
+    #[schema(example = "maria@email.com")]
     pub email: Option<String>,
     pub phone: Option<String>,
     pub mobile: Option<String>,
 
     pub address: Option<Value>,
+    #[schema(example = json!(["vip", "2024"]))]
     pub tags: Option<Vec<String>>,
 
-    // [NOVO] Array de IDs dos tipos (Ex: [ID_PACIENTE])
+    #[schema(example = json!(["550e8400-e29b-41d4-a716-446655440000"]))]
     pub entity_types: Option<Vec<Uuid>>,
 
     #[serde(default)]
+    #[schema(example = json!({"tamanho_camiseta": "P"}))]
     pub custom_data: Value,
 }
 
+// POST /api/crm/customers
+#[utoipa::path(
+    post,
+    path = "/api/crm/customers",
+    tag = "CRM",
+    request_body = CreateCustomerPayload,
+    responses(
+        (status = 201, description = "Cliente criado", body = Customer),
+        (status = 400, description = "Dados inválidos")
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn create_customer(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -198,7 +278,6 @@ pub async fn create_customer(
             payload.mobile.as_deref(),
             payload.address,
             payload.tags,
-            // [NOVO] Passando os tipos para ativar a validação dinâmica
             payload.entity_types,
             payload.custom_data
         )
@@ -208,7 +287,19 @@ pub async fn create_customer(
     Ok((StatusCode::CREATED, Json(customer)))
 }
 
-// Listagem simples
+// GET /api/crm/customers
+#[utoipa::path(
+    get,
+    path = "/api/crm/customers",
+    tag = "CRM",
+    responses(
+        (status = 200, description = "Lista de clientes", body = Vec<Customer>)
+    ),
+    params(
+        ("x-tenant-id" = Uuid, Header, description = "ID da Loja")
+    ),
+    security(("api_jwt" = []))
+)]
 pub async fn list_customers(
     State(app_state): State<AppState>,
     locale: Locale,

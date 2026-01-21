@@ -13,7 +13,20 @@ use crate::{
     models::auth::{AuthResponse, LoginUserPayload, RegisterUserPayload, User, UserCompany},
 };
 
-// Handler de registro
+// -----------------------------------------------------------------------------
+// POST /api/auth/register
+// -----------------------------------------------------------------------------
+#[utoipa::path(
+    post,
+    path = "/api/auth/register",
+    tag = "Auth",
+    request_body = RegisterUserPayload,
+    responses(
+        (status = 200, description = "Usuário registrado com sucesso", body = AuthResponse),
+        (status = 400, description = "Dados inválidos (Email mal formatado, senha curta)"),
+        (status = 409, description = "Conflito: E-mail já existe")
+    )
+)]
 pub async fn register(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -38,7 +51,20 @@ pub async fn register(
     Ok(Json(AuthResponse { token }))
 }
 
-// Handler de login
+// -----------------------------------------------------------------------------
+// POST /api/auth/login
+// -----------------------------------------------------------------------------
+#[utoipa::path(
+    post,
+    path = "/api/auth/login",
+    tag = "Auth",
+    request_body = LoginUserPayload,
+    responses(
+        (status = 200, description = "Login realizado com sucesso", body = AuthResponse),
+        (status = 400, description = "Dados inválidos"),
+        (status = 401, description = "Credenciais inválidas (Email ou senha incorretos)")
+    )
+)]
 pub async fn login(
     State(app_state): State<AppState>,
     locale: Locale,
@@ -46,35 +72,58 @@ pub async fn login(
 ) -> Result<Json<AuthResponse>, ApiError> {
     payload
         .validate()
-        //.map_err(ApiError::ValidationError)?;
         .map_err(|e| AppError::ValidationError(e).to_api_error(&locale, &app_state.i18n_store))?;
-    
-    // REMOVEMOS: let auth_service = AuthService::new(app_state);
-    // USAMOS DIRETAMENTE O SERVIÇO DO ESTADO:
+
     let token = app_state
         .auth_service
         .login_user(&payload.email, &payload.password)
         .await
         .map_err(|app_err| app_err.to_api_error(&locale, &app_state.i18n_store))?;
-    
+
     Ok(Json(AuthResponse { token }))
 }
 
-// Handler da rota protegida /me
-// (Este já estava correto e não precisa de mudanças)
+// -----------------------------------------------------------------------------
+// GET /api/users/me
+// -----------------------------------------------------------------------------
+#[utoipa::path(
+    get,
+    path = "/api/users/me",
+    tag = "Users",
+    responses(
+        (status = 200, description = "Dados do usuário logado", body = User),
+        (status = 401, description = "Não autorizado (Token inválido ou ausente)")
+    ),
+    security(
+        ("api_jwt" = []) // Requer apenas o Token, sem Tenant ID
+    )
+)]
 pub async fn get_me(AuthenticatedUser(user): AuthenticatedUser) -> Json<User> {
     Json(user)
 }
 
-// GET /api/me/companies
+// -----------------------------------------------------------------------------
+// GET /api/users/me/companies
+// -----------------------------------------------------------------------------
+#[utoipa::path(
+    get,
+    path = "/api/users/me/companies",
+    tag = "Users",
+    responses(
+        (status = 200, description = "Lista de empresas vinculadas ao usuário", body = Vec<UserCompany>),
+        (status = 401, description = "Não autorizado")
+    ),
+    security(
+        ("api_jwt" = []) // Requer apenas o Token
+    )
+)]
 pub async fn get_my_companies(
     State(app_state): State<AppState>,
-    // O Extractor AuthenticatedUser garante que só logado acessa e já nos dá o ID
     AuthenticatedUser(user): AuthenticatedUser,
     locale: Locale,
 ) -> Result<Json<Vec<UserCompany>>, ApiError> {
 
-    let companies = app_state.crm_service // <--- Mudamos para o Service
+    let companies = app_state.crm_service
         .find_companies_by_user(&app_state.db_pool, user.id)
         .await
         .map_err(|e| e.to_api_error(&locale, &app_state.i18n_store))?;
